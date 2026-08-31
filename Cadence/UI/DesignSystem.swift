@@ -40,7 +40,7 @@ struct BalanceBar: View {
             Text(title).font(.caption).foregroundStyle(.secondary)
             GeometryReader { geo in
                 let w = geo.size.width
-                let clamped = min(max(value, -1), 1)
+                let clamped = CGFloat(min(max(value, -1), 1))
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.08)).frame(height: 8)
                     Rectangle().fill(.white.opacity(0.25)).frame(width: 1, height: 14)
@@ -48,7 +48,7 @@ struct BalanceBar: View {
                     Circle()
                         .fill(Ink.strainColor(abs(clamped)))
                         .frame(width: 16, height: 16)
-                        .offset(x: (w / 2) + (w / 2 - 8) * clamped - 8)
+                        .offset(x: w / 2 + (w / 2 - 8) * clamped - 8)
                         .animation(.easeOut(duration: 0.4), value: clamped)
                 }
             }

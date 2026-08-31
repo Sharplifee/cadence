@@ -34,6 +34,14 @@ public struct Turn: Codable, Sendable {
 
     public var duration: TimeInterval { end - start }
     public var isInterruption: Bool { latency < -0.15 }
+
+    public init(speaker: Speaker, start: TimeInterval, end: TimeInterval,
+                meanDbfs: Float, meanF0: Float, meanSyllableRate: Float,
+                latency: TimeInterval) {
+        self.speaker = speaker; self.start = start; self.end = end
+        self.meanDbfs = meanDbfs; self.meanF0 = meanF0
+        self.meanSyllableRate = meanSyllableRate; self.latency = latency
+    }
 }
 
 /// What the engine believes about the gap between you and them, right now.
@@ -46,6 +54,15 @@ public struct Divergence: Codable, Sendable {
     public var interruptRate: Float   // my interruptions per minute
     public var confidence: Float      // 0..1, how much of this is trustworthy
 
+    public init(rateRatio: Float, loudnessDelta: Float, pitchDelta: Float,
+                turnLengthRatio: Float, talkShare: Float,
+                interruptRate: Float, confidence: Float) {
+        self.rateRatio = rateRatio; self.loudnessDelta = loudnessDelta
+        self.pitchDelta = pitchDelta; self.turnLengthRatio = turnLengthRatio
+        self.talkShare = talkShare; self.interruptRate = interruptRate
+        self.confidence = confidence
+    }
+
     public static let matched = Divergence(rateRatio: 1, loudnessDelta: 0, pitchDelta: 0,
                                            turnLengthRatio: 1, talkShare: 0.5,
                                            interruptRate: 0, confidence: 0)
@@ -57,6 +74,12 @@ public struct CueEvent: Codable, Sendable {
     public var divergence: Divergence
     /// Filled in 30 s later: did the divergence actually close after the cue?
     public var corrected: Bool?
+
+    public init(t: TimeInterval, code: CueCode, divergence: Divergence,
+                corrected: Bool? = nil) {
+        self.t = t; self.code = code
+        self.divergence = divergence; self.corrected = corrected
+    }
 }
 
 public struct SessionSummary: Codable, Sendable {
@@ -67,6 +90,14 @@ public struct SessionSummary: Codable, Sendable {
     public var interruptions: Int
     public var cues: [CueEvent]
     public var correctionRate: Float?
+
+    public init(id: UUID, startedAt: Date, duration: TimeInterval,
+                talkShare: Float, interruptions: Int, cues: [CueEvent],
+                correctionRate: Float?) {
+        self.id = id; self.startedAt = startedAt; self.duration = duration
+        self.talkShare = talkShare; self.interruptions = interruptions
+        self.cues = cues; self.correctionRate = correctionRate
+    }
 }
 
 public extension Divergence {
