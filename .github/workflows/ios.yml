@@ -112,7 +112,11 @@ jobs:
             -archivePath "$RUNNER_TEMP/Cadence.xcarchive" \
             CODE_SIGN_STYLE=Manual \
             DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
-            CURRENT_PROJECT_VERSION=$BUILD_NUMBER | xcpretty
+            CURRENT_PROJECT_VERSION=$BUILD_NUMBER 2>&1 | tee archive.log | xcpretty || {
+              echo '--- raw archive errors ---'
+              grep -iE "error:|does not support|requires a provisioning|Supported platforms|No profile|not valid" archive.log | sort -u | head -40
+              exit 1
+            }
 
       - name: Export IPA
         if: inputs.upload || github.ref == 'refs/heads/main'
