@@ -49,7 +49,7 @@ jobs:
           xcodebuild build \
             -project Cadence.xcodeproj \
             -scheme Cadence-iOS \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO | xcpretty
 
       # ---- everything below only runs when actually shipping ----
