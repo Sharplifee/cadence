@@ -107,7 +107,7 @@ jobs:
           set -o pipefail
           xcodebuild archive \
             -project Cadence.xcodeproj \
-            -scheme Cadence \
+            -scheme Cadence-iOS \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/Cadence.xcarchive" \
             CODE_SIGN_STYLE=Manual \

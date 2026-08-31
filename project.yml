@@ -15,6 +15,11 @@ schemes:
   # fails with "Supported platforms for the buildables in the current scheme is
   # empty". This iOS-only scheme exists purely so simulator builds work.
   #
+  # Declaring any scheme suppresses XcodeGen's per-target auto-schemes, so this
+  # is the ONLY scheme in the project and both the simulator build and the
+  # archive use it. The watch app still ships: it is a dependency of the Cadence
+  # target, so it is embedded either way.
+  #
   # No test target here on purpose: CadenceCoreTests is a Swift Package test
   # target, and XcodeGen rejects it with "Scheme has invalid test target" since
   # it is not an Xcode target. The core suite runs on Linux in core.yml, which
