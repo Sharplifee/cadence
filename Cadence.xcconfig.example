@@ -1,0 +1,3 @@
+// Copy to Cadence.xcconfig. Never commit the real one.
+CADENCE_API_URL = https://your-cadence-deployment.vercel.app
+CADENCE_API_KEY = replace-me

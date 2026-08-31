@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Cadence listens to your conversations on-device to coach your pace, volume and turn-taking.</string>
+  <key>UIBackgroundModes</key>
+  <array><string>audio</string></array>
+  <key>CADENCE_API_URL</key>
+  <string>$(CADENCE_API_URL)</string>
+  <key>CADENCE_API_KEY</key>
+  <string>$(CADENCE_API_KEY)</string>
+</dict>
+</plist>

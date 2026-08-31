@@ -1,0 +1,14 @@
+.DS_Store
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcodeproj
+node_modules/
+.env
+.env.local
+Cadence.xcconfig
+.build/
+*.p12
+*.p8
+secure/

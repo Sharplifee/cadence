@@ -1,0 +1,175 @@
+# Built on the pattern proven by Sharplifee/nearfield and Sharplifee/parking-sentry.
+# No Mac exists anywhere in this pipeline. Every numbered comment below is a fix
+# that was already paid for with a failed run on another repo — do not "simplify"
+# them away.
+#
+# REPO MUST BE PUBLIC. Private repos on this account hit the Actions spending
+# limit and fail in 2-5 seconds with an empty steps array, which looks exactly
+# like a broken workflow file and is not.
+name: iOS + watchOS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: 'Upload to TestFlight'
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v5        # 2. v4 is on deprecated Node 20
+
+      # 1. Never hardcode an Xcode path — the installed version moves.
+      - name: Select newest Xcode
+        run: |
+          newest=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "DEVELOPER_DIR=$newest/Contents/Developer" >> $GITHUB_ENV
+          echo "Using $newest"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      # Unsigned simulator build first. A signing failure must never be able to
+      # masquerade as a compile failure — that wastes a whole cycle on the wrong
+      # layer. 5. Use -destination, never -sdk: -sdk iphoneos forces the watch
+      # dependency to build against the iOS SDK and WatchKit disappears.
+      - name: Build and test (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Cadence.xcodeproj \
+            -scheme Cadence-iOS \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            CODE_SIGNING_ALLOWED=NO | xcpretty
+
+      # ---- everything below only runs when actually shipping ----
+
+      - name: Build signing keychain
+        if: inputs.upload || github.ref == 'refs/heads/main'
+        env:
+          APPLE_DIST_P12: ${{ secrets.APPLE_DIST_P12 }}
+          APPLE_DIST_P12_PASSWORD: ${{ secrets.APPLE_DIST_P12_PASSWORD }}
+          APPLE_PROVISION_PROFILE: ${{ secrets.APPLE_PROVISION_PROFILE }}
+          APPLE_PROVISION_PROFILE_WATCH: ${{ secrets.APPLE_PROVISION_PROFILE_WATCH }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN=$RUNNER_TEMP/build.keychain
+          security create-keychain -p ci "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"   # 8. no auto-lock mid-archive
+          security unlock-keychain -p ci "$KEYCHAIN"
+
+          # 8. A fresh keychain has no WWDR intermediate, so a perfectly valid
+          # leaf cert reports "Signing certificate is invalid ... may have been
+          # revoked or expired". Import the intermediate BEFORE the .p12.
+          curl -fsSL -o wwdr.cer https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+          security import wwdr.cer -k "$KEYCHAIN" -T /usr/bin/codesign
+
+          echo "$APPLE_DIST_P12" | base64 --decode > dist.p12
+          security import dist.p12 -k "$KEYCHAIN" -P "$APPLE_DIST_P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "$APPLE_PROVISION_PROFILE" | base64 --decode \
+            > ~/Library/MobileDevice/Provisioning\ Profiles/cadence.mobileprovision
+          echo "$APPLE_PROVISION_PROFILE_WATCH" | base64 --decode \
+            > ~/Library/MobileDevice/Provisioning\ Profiles/cadence_watch.mobileprovision
+
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      # 13. Build number resolved at run time from TestFlight, so it can never
+      # collide and never needs a commit to bump.
+      - name: Resolve next build number
+        if: inputs.upload || github.ref == 'refs/heads/main'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"          # 3. runner pip is externally-managed
+          "$RUNNER_TEMP/venv/bin/pip" install -q pyjwt cryptography requests
+          "$RUNNER_TEMP/venv/bin/python" scripts/next_build_number.py >> $GITHUB_ENV
+
+      - name: Archive
+        if: inputs.upload || github.ref == 'refs/heads/main'
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project Cadence.xcodeproj \
+            -scheme Cadence \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Cadence.xcarchive" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
+            CURRENT_PROJECT_VERSION=$BUILD_NUMBER | xcpretty
+
+      - name: Export IPA
+        if: inputs.upload || github.ref == 'refs/heads/main'
+        run: |
+          set -o pipefail
+          # 9. Under manual signing the bundle id must map to the profile NAME,
+          # or exportArchive fails with "requires a provisioning profile" even
+          # though the archive itself is correctly signed.
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store</string>
+            <key>teamID</key><string>${{ secrets.APPLE_TEAM_ID }}</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>provisioningProfiles</key><dict>
+              <key>com.connor.cadence</key><string>Cadence CI</string>
+              <key>com.connor.cadence.watchkitapp</key><string>Cadence Watch CI</string>
+            </dict>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Cadence.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" | xcpretty
+
+      - name: Upload to TestFlight
+        if: inputs.upload || github.ref == 'refs/heads/main'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$ASC_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+
+          set +e
+          xcrun altool --upload-app -f "$RUNNER_TEMP/export/Cadence.ipa" -t ios \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1 | tee altool.log
+          code=${PIPESTATUS[0]}
+          set -e
+
+          # 11. altool exits 0 even when the upload was rejected.
+          if grep -q "ERROR" altool.log; then
+            echo "altool reported an error despite exit $code"; exit 1
+          fi
+          # 12. altool exits 31 on a 409 even when the binary already landed.
+          # Poll for the build instead of blind-retrying, which makes it worse.
+          if [ "$code" -ne 0 ]; then
+            echo "altool exit $code — checking whether the build landed anyway"
+            "$RUNNER_TEMP/venv/bin/python" scripts/confirm_build.py "$BUILD_NUMBER"
+          fi
+
+      - name: Keep the signed IPA regardless of upload outcome
+        if: always() && (inputs.upload || github.ref == 'refs/heads/main')
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cadence-ipa
+          path: ${{ runner.temp }}/export/*.ipa
+          if-no-files-found: ignore

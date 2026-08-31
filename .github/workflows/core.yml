@@ -1,0 +1,35 @@
+# Runs on Linux, on every push. This is where day-to-day development actually
+# happens: the whole analysis brain is Foundation-only, so it compiles and tests
+# here in seconds without touching a macOS runner or burning macOS CI minutes.
+name: Core
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    container: swift:6.0.3-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test --enable-code-coverage
+      - name: Parse-check the Apple layer
+        # Full type-checking needs the macOS SDK, but syntax errors are catchable
+        # here — and catching them here saves a ten-minute macOS round trip.
+        run: |
+          fail=0
+          for f in $(find Cadence CadenceWatch -name '*.swift'); do
+            if ! swiftc -parse "$f" 2>&1 | tee /tmp/out | grep -q .; then
+              echo "  ok  $f"
+            elif grep -q "error:" /tmp/out; then
+              echo "FAIL $f"; grep "error:" /tmp/out; fail=1
+            else
+              echo "  ok  $f"
+            fi
+          done
+          exit $fail
