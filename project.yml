@@ -28,6 +28,8 @@ schemes:
     build:
       targets:
         Cadence: all
+    archive:
+      config: Release
 
 targets:
   Cadence:

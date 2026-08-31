@@ -110,7 +110,9 @@ jobs:
             -scheme Cadence-iOS \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/Cadence.xcarchive" \
+            -configuration Release \
             CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
             DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
             CURRENT_PROJECT_VERSION=$BUILD_NUMBER 2>&1 | tee archive.log | xcpretty || {
               echo '--- raw archive errors ---'
