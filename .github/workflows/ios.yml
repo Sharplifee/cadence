@@ -43,10 +43,10 @@ jobs:
       # masquerade as a compile failure — that wastes a whole cycle on the wrong
       # layer. 5. Use -destination, never -sdk: -sdk iphoneos forces the watch
       # dependency to build against the iOS SDK and WatchKit disappears.
-      - name: Build and test (unsigned)
+      - name: Build (unsigned)
         run: |
           set -o pipefail
-          xcodebuild test \
+          xcodebuild build \
             -project Cadence.xcodeproj \
             -scheme Cadence-iOS \
             -destination 'platform=iOS Simulator,name=iPhone 16' \

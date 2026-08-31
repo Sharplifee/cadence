@@ -13,13 +13,16 @@ packages:
 schemes:
   # 4. A scheme that embeds the watch app plus `-destination generic/platform=iOS`
   # fails with "Supported platforms for the buildables in the current scheme is
-  # empty". This iOS-only scheme exists purely so simulator builds and tests work.
+  # empty". This iOS-only scheme exists purely so simulator builds work.
+  #
+  # No test target here on purpose: CadenceCoreTests is a Swift Package test
+  # target, and XcodeGen rejects it with "Scheme has invalid test target" since
+  # it is not an Xcode target. The core suite runs on Linux in core.yml, which
+  # is faster and free anyway.
   Cadence-iOS:
     build:
       targets:
         Cadence: all
-    test:
-      targets: [CadenceCoreTests]
 
 targets:
   Cadence:
