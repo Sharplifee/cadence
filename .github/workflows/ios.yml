@@ -8,6 +8,13 @@
 # like a broken workflow file and is not.
 name: iOS + watchOS
 
+# Only one iOS run at a time. A push and a manual dispatch used to race, both
+# resolve the same next build number, and the loser dies on Apple's "Redundant
+# Binary Upload" — which reads like a build-numbering bug and is not.
+concurrency:
+  group: ios-build
+  cancel-in-progress: false
+
 on:
   push:
     branches: [main]
@@ -55,7 +62,7 @@ jobs:
       # ---- everything below only runs when actually shipping ----
 
       - name: Build signing keychain
-        if: inputs.upload || github.ref == 'refs/heads/main'
+        if: inputs.upload
         env:
           APPLE_DIST_P12: ${{ secrets.APPLE_DIST_P12 }}
           APPLE_DIST_P12_PASSWORD: ${{ secrets.APPLE_DIST_P12_PASSWORD }}
@@ -91,7 +98,7 @@ jobs:
       # 13. Build number resolved at run time from TestFlight, so it can never
       # collide and never needs a commit to bump.
       - name: Resolve next build number
-        if: inputs.upload || github.ref == 'refs/heads/main'
+        if: inputs.upload
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -102,7 +109,7 @@ jobs:
           "$RUNNER_TEMP/venv/bin/python" scripts/next_build_number.py >> $GITHUB_ENV
 
       - name: Archive
-        if: inputs.upload || github.ref == 'refs/heads/main'
+        if: inputs.upload
         run: |
           set -o pipefail
           xcodebuild archive \
@@ -121,7 +128,7 @@ jobs:
             }
 
       - name: Export IPA
-        if: inputs.upload || github.ref == 'refs/heads/main'
+        if: inputs.upload
         run: |
           set -o pipefail
           # 9. Under manual signing the bundle id must map to the profile NAME,
@@ -146,7 +153,7 @@ jobs:
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" | xcpretty
 
       - name: Upload to TestFlight
-        if: inputs.upload || github.ref == 'refs/heads/main'
+        if: inputs.upload
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -173,7 +180,7 @@ jobs:
           fi
 
       - name: Keep the signed IPA regardless of upload outcome
-        if: always() && (inputs.upload || github.ref == 'refs/heads/main')
+        if: always() && inputs.upload
         uses: actions/upload-artifact@v5
         with:
           name: Cadence-ipa
