@@ -19,24 +19,26 @@ def token() -> str:
     )
 
 def main() -> None:
+    # The run number is the floor and the safety net: it is strictly increasing
+    # for the life of the repo, so a build number derived from it can never
+    # land on a number Apple has already seen and thrown away.
+    run = int(os.environ.get("GITHUB_RUN_NUMBER", "0"))
+
     h = {"Authorization": f"Bearer {token()}"}
     apps = requests.get("https://api.appstoreconnect.apple.com/v1/apps",
                         headers=h, params={"filter[bundleId]": APP_BUNDLE},
                         timeout=30).json().get("data", [])
-    if not apps:
-        # The app record does not exist yet — POST /v1/apps is permanently 403,
-        # so this is expected until it is created in the browser. Start at 1.
-        print("BUILD_NUMBER=1")
-        return
-    app_id = apps[0]["id"]
-    builds = requests.get("https://api.appstoreconnect.apple.com/v1/builds",
-                          headers=h,
-                          params={"filter[app]": app_id, "limit": 200},
-                          timeout=30).json().get("data", [])
-    highest = max((int(b["attributes"]["version"])
-                   for b in builds
-                   if b["attributes"].get("version", "").isdigit()), default=0)
-    print(f"BUILD_NUMBER={highest + 1}")
+    highest = 0
+    if apps:
+        builds = requests.get("https://api.appstoreconnect.apple.com/v1/builds",
+                              headers=h,
+                              params={"filter[app]": apps[0]["id"], "limit": 200},
+                              timeout=30).json().get("data", [])
+        highest = max((int(b["attributes"]["version"])
+                       for b in builds
+                       if b["attributes"].get("version", "").isdigit()), default=0)
+
+    print(f"BUILD_NUMBER={max(highest + 1, run)}")
 
 if __name__ == "__main__":
     main()

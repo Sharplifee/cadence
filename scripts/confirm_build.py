@@ -40,7 +40,13 @@ def main() -> None:
             print(f"Build {wanted} is present in App Store Connect — upload succeeded.")
             return
         time.sleep(30)
-    sys.exit(f"Build {wanted} never appeared — the upload genuinely failed.")
+    sys.exit(
+        f"Build {wanted} never appeared in App Store Connect after 5 minutes.\n"
+        "altool accepted the bytes but Apple created no build. Usual causes:\n"
+        "  - this version+build pair was uploaded and rejected before, so Apple\n"
+        "    now discards it silently. Bump the build number.\n"
+        "  - processing rejected the binary; Apple emails the account holder\n"
+        "    with an ITMS-xxxxx code. Check that mail.")
 
 if __name__ == "__main__":
     main()

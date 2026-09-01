@@ -176,8 +176,14 @@ jobs:
           # Poll for the build instead of blind-retrying, which makes it worse.
           if [ "$code" -ne 0 ]; then
             echo "altool exit $code — checking whether the build landed anyway"
-            "$RUNNER_TEMP/venv/bin/python" scripts/confirm_build.py "$BUILD_NUMBER"
           fi
+
+          # 15. "No errors uploading" only means Apple accepted the bytes. It
+          # does NOT mean a build exists. Three deliveries in a row reported
+          # success while App Store Connect created nothing, because Apple
+          # silently discards a version+build pair it has already rejected.
+          # Always confirm against the API, or the pipeline lies to you.
+          "$RUNNER_TEMP/venv/bin/python" scripts/confirm_build.py "$BUILD_NUMBER"
 
       - name: Keep the signed IPA regardless of upload outcome
         if: always() && inputs.upload
