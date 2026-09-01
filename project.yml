@@ -47,6 +47,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.connor.cadence
         SWIFT_VERSION: "5.9"
         CODE_SIGN_ENTITLEMENTS: Cadence/Cadence.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PROVISIONING_PROFILE_SPECIFIER: SelfAttune CI
         TARGETED_DEVICE_FAMILY: "1"
 
@@ -69,6 +70,10 @@ targets:
         # one from the INFOPLIST_KEY_* settings below. Without this the build
         # dies with "Build input file cannot be found: .../CadenceWatch.app/Info.plist".
         GENERATE_INFOPLIST_FILE: YES
+        # Apple rejects the upload without this: "A value for the Info.plist key
+        # 'CFBundleIconName' is missing in the bundle". Setting the appicon name
+        # is what populates it when the plist is generated.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PROVISIONING_PROFILE_SPECIFIER: SelfAttune Watch CI
         INFOPLIST_KEY_CFBundleDisplayName: Cadence
         INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.connor.cadence
