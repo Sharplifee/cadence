@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Written by hand rather than generated. GENERATE_INFOPLIST_FILE only
+       emits CFBundleIconName when the asset catalog yields an AppIcon, and
+       INFOPLIST_KEY_CFBundleIconName is not one of the settings Xcode honours —
+       so the watch app shipped twice with no icon key and Apple discarded both
+       builds without an error. An explicit file removes the guesswork. -->
+  <key>CFBundleDevelopmentRegion</key>
+  <string>$(DEVELOPMENT_LANGUAGE)</string>
+  <key>CFBundleExecutable</key>
+  <string>$(EXECUTABLE_NAME)</string>
+  <key>CFBundleIdentifier</key>
+  <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>$(PRODUCT_NAME)</string>
+  <key>CFBundleDisplayName</key>
+  <string>Self Attune</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.2.0</string>
+  <key>CFBundleVersion</key>
+  <string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>CFBundleIconName</key>
+  <string>AppIcon</string>
+
+  <key>WKApplication</key>
+  <true/>
+  <key>WKCompanionAppBundleIdentifier</key>
+  <string>com.connor.cadence</string>
+  <key>WKRunsIndependentlyOfCompanionApp</key>
+  <false/>
+  <key>WKBackgroundModes</key>
+  <array><string>workout-processing</string></array>
+
+  <key>NSHealthShareUsageDescription</key>
+  <string>Self Attune keeps a mindfulness session running so it can coach you for a whole conversation without being suspended.</string>
+  <key>NSHealthUpdateUsageDescription</key>
+  <string>Self Attune keeps a mindfulness session running so it can coach you for a whole conversation without being suspended.</string>
+</dict>
+</plist>
