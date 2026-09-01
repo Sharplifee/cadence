@@ -3,14 +3,18 @@ import Foundation
 import WatchConnectivity
 import WatchKit
 
-/// Receives two bytes and keeps the app alive long enough to feel them.
-public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate,
-                                  WKExtendedRuntimeSessionDelegate {
+/// Receives cues from the phone. Four bytes now: the cue, the strain, the
+/// channel mask and the escalation tier — so the wrist plays exactly what the
+/// phone decided, and the two devices never disagree about how loud to be.
+@MainActor
+public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate {
     @Published public var active = false
     @Published public var lastCue: CueCode = .none
     @Published public var strain: Double = 0
+    @Published public var tier: Int = 1
 
-    private var runtime: WKExtendedRuntimeSession?
+    public let cuePlayer = WatchCuePlayer()
+    public let runtime = WorkoutRuntime()
 
     public override init() {
         super.init()
@@ -19,48 +23,35 @@ public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate,
         WCSession.default.activate()
     }
 
-    public func session(_ s: WCSession, didReceiveMessageData data: Data) {
-        guard let first = data.first, let cue = CueCode(rawValue: first) else { return }
-        let strainByte = data.count > 1 ? Double(data[1]) / 255 : 0
+    nonisolated public func session(_ s: WCSession, didReceiveMessageData data: Data) {
+        let bytes = [UInt8](data)
+        Task { @MainActor in self.handle(bytes) }
+    }
 
-        DispatchQueue.main.async {
-            self.strain = strainByte
-            switch cue {
-            case .sessionStart: self.active = true;  self.beginRuntime()
-            case .sessionEnd:   self.active = false; self.endRuntime()
-            case .none:         return                       // strain-only ping
-            default:            self.lastCue = cue
-            }
-            HapticPlayer.play(cue)
+    private func handle(_ bytes: [UInt8]) {
+        guard let first = bytes.first, let cue = CueCode(rawValue: first) else { return }
+        strain = bytes.count > 1 ? Double(bytes[1]) / 255 : strain
+        let channels = Channels(rawValue: bytes.count > 2 ? Int(bytes[2]) : Channels.haptic.rawValue)
+        tier = bytes.count > 3 ? max(1, Int(bytes[3])) : 1
+
+        switch cue {
+        case .sessionStart:
+            active = true
+            // The phone launched us via startWatchApp, which already began a
+            // workout session; start() is a no-op if one is running.
+            runtime.start()
+        case .sessionEnd:
+            active = false
+            runtime.stop()
+        case .none:
+            return                                  // strain-only ping
+        default:
+            lastCue = cue
         }
+        cuePlayer.play(cue, channels: channels, tier: tier)
     }
 
-    /// An extended runtime session buys roughly an hour. It expires rather than
-    /// dying, so it is restarted on expiry to cover a long dinner.
-    private func beginRuntime() {
-        guard runtime == nil else { return }
-        let s = WKExtendedRuntimeSession()
-        s.delegate = self
-        s.start()
-        runtime = s
-    }
-
-    private func endRuntime() {
-        runtime?.invalidate()
-        runtime = nil
-    }
-
-    public func extendedRuntimeSessionDidStart(_ s: WKExtendedRuntimeSession) {}
-    public func extendedRuntimeSessionWillExpire(_ s: WKExtendedRuntimeSession) {
-        runtime = nil
-        if active { beginRuntime() }
-    }
-    public func extendedRuntimeSession(_ s: WKExtendedRuntimeSession,
-                                       didInvalidateWith reason: WKExtendedRuntimeSessionInvalidationReason,
-                                       error: Error?) {
-        runtime = nil
-        if active { beginRuntime() }
-    }
-
-    public func session(_ s: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {}
+    nonisolated public func session(_ s: WCSession,
+                                    activationDidCompleteWith state: WCSessionActivationState,
+                                    error: Error?) {}
 }

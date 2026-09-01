@@ -13,7 +13,13 @@ public final class SessionController: ObservableObject {
     @Published public private(set) var lastCue: CueCode = .none
     @Published public private(set) var elapsed: TimeInterval = 0
 
-    public var metronomeEnabled = false
+    @Published public var settings = CueSettings()
+    @Published public private(set) var watchReady = false
+
+    public var metronomeEnabled: Bool {
+        get { settings.metronomeEnabled }
+        set { settings.metronomeEnabled = newValue }
+    }
 
     private let capture = AudioCapture()
     private let vad = VoiceActivity()
@@ -23,6 +29,11 @@ public final class SessionController: ObservableObject {
     private let policy = CuePolicy()
     private let watch = WatchBridge()
     private let store = SessionStore()
+    private let cuePlayer = CuePlayer()
+    private let launcher = WatchLauncher()
+    private lazy var escalation = EscalationTracker { [weak self] in
+        self?.settings ?? CueSettings()
+    }
 
     private var sessionID = UUID()
     private var startedAt = Date()
@@ -43,10 +54,27 @@ public final class SessionController: ObservableObject {
         policy.applySensitivity(Float(value))
     }
 
-    /// Fires a cue on the watch on demand, for the onboarding and settings
-    /// screens. Learning the vocabulary should not require a bad conversation.
-    public func preview(_ cue: CueCode) {
-        watch.send(cue)
+    /// Fires a cue on demand across whatever channels are enabled, for the
+    /// onboarding and settings screens. Learning the vocabulary should not
+    /// require a bad conversation.
+    public func preview(_ cue: CueCode, tier: Int = 1) {
+        let channels = settings.resolvedChannels(streak: tier == 1 ? 1 : (tier == 2 ? settings.escalation.tier2At : settings.escalation.tier3At))
+        deliver(cue, channels: channels, tier: tier)
+    }
+
+    /// One place decides what plays and where, so the phone and the wrist can
+    /// never fall out of step about it.
+    private func deliver(_ cue: CueCode, channels: Channels, tier: Int) {
+        if settings.devices.contains(.phone) {
+            cuePlayer.play(cue, channels: channels, tier: tier)
+        }
+        if settings.devices.contains(.watch) {
+            watch.send(cue, strain: divergence.strain, channels: channels, tier: tier)
+        }
+    }
+
+    public func prepareWatch() async {
+        _ = await launcher.requestAuthorization()
     }
 
     public func startEnrollment() throws {
@@ -69,14 +97,30 @@ public final class SessionController: ObservableObject {
         sessionID = UUID(); startedAt = Date()
         frameIndex = 0; frames.removeAll(); elapsed = 0
         lastCue = .none; divergence = .matched
+        escalation.reset()
         try capture.start()
-        watch.send(.sessionStart)
+
+        // Starting on the phone must start the watch too. This is one app on
+        // two devices, so requiring the user to open both is a bug, not a step.
+        if settings.devices.contains(.watch) {
+            Task { @MainActor in
+                do {
+                    try await launcher.launchWatchApp()
+                    watchReady = true
+                } catch {
+                    // The watch may be absent, locked or out of range. The
+                    // phone still coaches on its own — degrade, never block.
+                    watchReady = false
+                }
+                watch.send(.sessionStart, strain: 0, channels: .silent, tier: 1)
+            }
+        }
         isRunning = true
     }
 
     public func stop() {
         capture.stop()
-        watch.send(.sessionEnd)
+        watch.send(.sessionEnd, strain: 0, channels: .silent, tier: 1)
         isRunning = false
 
         let summary = SessionSummary(
@@ -128,12 +172,18 @@ public final class SessionController: ObservableObject {
 
         if let cue = policy.evaluate(d, at: t) {
             lastCue = cue
-            watch.send(cue, strain: d.strain)
-        } else if metronomeEnabled, let cadence = engine.theirCadence(), t - lastTick >= cadence {
+            let step = escalation.register(at: t)
+            deliver(cue, channels: step.channels, tier: step.tier)
+        } else if settings.metronomeEnabled,
+                  let cadence = engine.theirCadence(), t - lastTick >= cadence {
             lastTick = t
-            watch.send(.metronomeTick, strain: d.strain)
+            deliver(.metronomeTick, channels: [.haptic], tier: 1)
         } else {
             watch.sendStrain(d.strain)
         }
+
+        // Acting on a cue drops you back to a private nudge. The ladder is a
+        // response to being ignored, not to being imperfect.
+        if policy.events.last?.corrected == true { escalation.registerCorrection() }
     }
 }

@@ -135,27 +135,15 @@ struct MatchRing: View {
     }
 }
 
-/// A visual stand-in for the haptic rhythm, so the pattern can be learned by
-/// eye before it has to be recognised by wrist.
+/// A visual stand-in for the haptic rhythm, drawn from the same CuePattern the
+/// haptics use — so the picture and the buzz can never drift apart.
 struct HapticGlyph: View {
     let cue: CueCode
-
-    private var dots: (count: Int, spacing: CGFloat, wide: Bool) {
-        switch cue {
-        case .slowDown:        return (2, 9, false)
-        case .lowerVolume:     return (1, 0, true)
-        case .yieldFloor:      return (3, 4, false)
-        case .stopOverlapping: return (2, 3, false)
-        default:               return (1, 0, false)
-        }
-    }
-
     var body: some View {
-        HStack(spacing: dots.spacing) {
-            ForEach(0..<dots.count, id: \.self) { _ in
-                Capsule()
-                    .fill(.white.opacity(0.75))
-                    .frame(width: dots.wide ? 26 : 7, height: 7)
+        HStack(spacing: 4) {
+            ForEach(Array(CuePattern.pattern(for: cue).pulses.enumerated()), id: \.offset) { _, p in
+                Capsule().fill(.white.opacity(0.75))
+                    .frame(width: max(6, p.on * 38), height: 7)
             }
         }
     }

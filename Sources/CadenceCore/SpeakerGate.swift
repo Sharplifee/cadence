@@ -22,7 +22,9 @@ public struct NearFieldClassifier: SpeakerClassifier {
     private var samples = 0
 
     /// Below this many enrollment frames the gate abstains rather than guessing.
-    private let requiredSamples = 60
+    /// A 30-second read yields roughly 40-50 speech frames once pauses between
+    /// sentences are excluded, so this sits below that with margin.
+    private let requiredSamples = 32
 
     public init() {}
 

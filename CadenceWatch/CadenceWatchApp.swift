@@ -6,21 +6,34 @@ struct CadenceWatchApp: App {
     @StateObject private var receiver = PhoneReceiver()
     var body: some Scene {
         WindowGroup {
-            WatchRootView().environmentObject(receiver)
+            WatchRootView()
+                .environmentObject(receiver)
+                .task { await receiver.runtime.requestAuthorization() }
         }
     }
 }
 
-/// Two pages. The first is a glanceable ring you can read through a shirt cuff;
-/// the second is the vocabulary, for the first fortnight before it is habit.
+/// Two pages: a glanceable ring, and the vocabulary for the first fortnight
+/// before it becomes habit. The flash overlay sits above both.
 struct WatchRootView: View {
     @EnvironmentObject var receiver: PhoneReceiver
+
     var body: some View {
-        TabView {
-            WatchLiveView()
-            WatchLegendView()
+        ZStack {
+            TabView {
+                WatchLiveView()
+                WatchLegendView()
+            }
+            .tabViewStyle(.verticalPage)
+
+            // The watch has no torch, so the screen is the light. Full white,
+            // ignoring safe areas, is the only thing bright enough to register
+            // in peripheral vision under a cuff.
+            if receiver.cuePlayer.flashOn {
+                Color.white.ignoresSafeArea().transition(.opacity)
+            }
         }
-        .tabViewStyle(.verticalPage)
+        .animation(.linear(duration: 0.04), value: receiver.cuePlayer.flashOn)
     }
 }
 
@@ -44,8 +57,7 @@ struct WatchLiveView: View {
                 if receiver.lastCue != .none && receiver.active {
                     Text(receiver.lastCue.label)
                         .font(.system(size: 11, weight: .medium))
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 3)
+                        .multilineTextAlignment(.center).padding(.top, 3)
                 }
             }
         }
@@ -58,15 +70,21 @@ struct WatchLiveView: View {
 }
 
 struct WatchLegendView: View {
+    @EnvironmentObject var receiver: PhoneReceiver
     private let cues: [CueCode] = [.slowDown, .lowerVolume, .yieldFloor, .stopOverlapping]
 
     var body: some View {
         List {
             ForEach(cues, id: \.rawValue) { cue in
-                HStack(spacing: 10) {
-                    WatchGlyph(cue: cue)
-                    Text(cue.label).font(.system(size: 13))
+                Button {
+                    receiver.cuePlayer.play(cue, channels: .haptic, tier: 1)
+                } label: {
+                    HStack(spacing: 10) {
+                        WatchGlyph(cue: cue)
+                        Text(cue.label).font(.system(size: 13))
+                    }
                 }
+                .buttonStyle(.plain)
                 .listRowBackground(Color.clear)
             }
         }
@@ -76,22 +94,13 @@ struct WatchLegendView: View {
 
 struct WatchGlyph: View {
     let cue: CueCode
-    private var shape: (count: Int, spacing: CGFloat, wide: Bool) {
-        switch cue {
-        case .slowDown:        return (2, 7, false)
-        case .lowerVolume:     return (1, 0, true)
-        case .yieldFloor:      return (3, 3, false)
-        case .stopOverlapping: return (2, 2, false)
-        default:               return (1, 0, false)
-        }
-    }
     var body: some View {
-        HStack(spacing: shape.spacing) {
-            ForEach(0..<shape.count, id: \.self) { _ in
+        HStack(spacing: 3) {
+            ForEach(Array(CuePattern.pattern(for: cue).pulses.enumerated()), id: \.offset) { _, p in
                 Capsule().fill(.white.opacity(0.8))
-                    .frame(width: shape.wide ? 20 : 5, height: 5)
+                    .frame(width: max(4, p.on * 28), height: 5)
             }
         }
-        .frame(width: 34, alignment: .leading)
+        .frame(width: 40, alignment: .leading)
     }
 }

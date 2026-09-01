@@ -219,3 +219,120 @@ final class StrainAndSensitivityTests: XCTestCase {
         XCTAssertNotNil(eager.evaluate(d, at: 30))
     }
 }
+
+final class CuePatternTests: XCTestCase {
+    func testEveryCueHasADistinctRhythm() {
+        let cues: [CueCode] = [.slowDown, .lowerVolume, .yieldFloor, .stopOverlapping]
+        let patterns = cues.map { CuePattern.pattern(for: $0) }
+        for i in patterns.indices {
+            for j in patterns.indices where i != j {
+                XCTAssertNotEqual(patterns[i], patterns[j],
+                                  "two cues share a rhythm and cannot be told apart")
+            }
+        }
+    }
+
+    func testScheduleOffsetsAccumulate() {
+        let p = CuePattern(pulses: [.init(on: 0.1, gap: 0.2), .init(on: 0.1, gap: 0)])
+        let s = p.schedule
+        XCTAssertEqual(s.count, 2)
+        XCTAssertEqual(s[0].at, 0, accuracy: 0.001)
+        XCTAssertEqual(s[1].at, 0.3, accuracy: 0.001)
+        XCTAssertEqual(p.duration, 0.4, accuracy: 0.001)
+    }
+
+    func testNoneIsSilent() {
+        XCTAssertTrue(CuePattern.pattern(for: .none).pulses.isEmpty)
+        XCTAssertEqual(CuePattern.pattern(for: .none).duration, 0)
+    }
+
+    func testPatternsAreShortEnoughToLandInAConversation() {
+        for c in CueCode.allCases {
+            XCTAssertLessThan(CuePattern.pattern(for: c).duration, 1.0,
+                              "\(c.label) takes too long to feel")
+        }
+    }
+}
+
+final class EscalationTests: XCTestCase {
+    func testLadderClimbsWithIgnoredCues() {
+        var s = CueSettings()
+        let t = EscalationTracker { s }
+        _ = s
+        var last = (streak: 0, channels: Channels.silent, tier: 0)
+        for i in 1...6 { last = t.register(at: Double(i) * 60) }
+        XCTAssertEqual(last.streak, 6)
+        XCTAssertEqual(last.tier, 3)
+        XCTAssertTrue(last.channels.contains(.flash))
+    }
+
+    func testFirstCuesAreHapticOnly() {
+        let s = CueSettings()
+        let t = EscalationTracker { s }
+        let r = t.register(at: 0)
+        XCTAssertEqual(r.tier, 1)
+        XCTAssertTrue(r.channels.contains(.haptic))
+        XCTAssertFalse(r.channels.contains(.sound))
+        XCTAssertFalse(r.channels.contains(.flash))
+    }
+
+    func testCorrectingResetsTheLadder() {
+        let s = CueSettings()
+        let t = EscalationTracker { s }
+        for i in 1...5 { _ = t.register(at: Double(i) * 60) }
+        t.registerCorrection()
+        XCTAssertEqual(t.register(at: 400).tier, 1,
+                       "correcting must drop you back to a private nudge")
+    }
+
+    func testStreakDecaysAfterQuietPeriod() {
+        let s = CueSettings()
+        let t = EscalationTracker { s }
+        for i in 1...5 { _ = t.register(at: Double(i) * 60) }
+        XCTAssertEqual(t.register(at: 5000).streak, 1)
+    }
+
+    func testAllowedChannelsCapTheLadder() {
+        var s = CueSettings()
+        s.allowed = [.haptic, .sound]        // user has switched flashing off
+        let t = EscalationTracker { s }
+        var last = (streak: 0, channels: Channels.silent, tier: 0)
+        for i in 1...9 { last = t.register(at: Double(i) * 60) }
+        XCTAssertEqual(last.tier, 3)
+        XCTAssertFalse(last.channels.contains(.flash),
+                       "an explicit user opt-out must survive every escalation tier")
+    }
+
+    func testSilentModeNeverMakesNoise() {
+        var s = CueSettings()
+        s.allowed = .silent
+        let t = EscalationTracker { s }
+        var last = (streak: 0, channels: Channels.all, tier: 0)
+        for i in 1...12 { last = t.register(at: Double(i) * 60) }
+        XCTAssertEqual(last.channels, .haptic)
+    }
+}
+
+final class EnrollmentScriptTests: XCTestCase {
+    func testScriptIsLongEnoughToReadForThirtySeconds() {
+        // ~150 words/min conversational -> 2.5 words/sec -> ~75 words for 30 s.
+        let words = EnrollmentScript.lines.joined(separator: " ")
+            .split(separator: " ").count
+        XCTAssertGreaterThan(words, 60)
+        XCTAssertLessThan(words, 110, "too long to finish inside the timer")
+    }
+
+    func testScriptCoversTheAlphabet() {
+        // A profile built from a narrow sound range only matches a narrow voice.
+        let text = EnrollmentScript.lines.joined().lowercased()
+        let missing = "abcdefghijklmnopqrstuvwxyz".filter { !text.contains($0) }
+        XCTAssertTrue(missing.isEmpty, "script never exercises: \(String(missing))")
+    }
+
+    func testLineIndexStaysInBounds() {
+        XCTAssertEqual(EnrollmentScript.lineIndex(atFraction: -1), 0)
+        XCTAssertEqual(EnrollmentScript.lineIndex(atFraction: 0), 0)
+        XCTAssertEqual(EnrollmentScript.lineIndex(atFraction: 2),
+                       EnrollmentScript.lines.count - 1)
+    }
+}

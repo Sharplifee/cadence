@@ -44,6 +44,7 @@ private struct WelcomeStep: View {
 }
 
 private struct PermissionStep: View {
+    @EnvironmentObject var controller: SessionController
     let next: () -> Void
     @State private var denied = false
 
@@ -51,7 +52,7 @@ private struct PermissionStep: View {
         VStack(spacing: 22) {
             Image(systemName: "mic.circle").font(.system(size: 72)).foregroundStyle(Ink.them)
             Text("Microphone").font(.title2.weight(.semibold))
-            Text("Everything is analysed on this phone. Audio is never uploaded — only the numbers, and only if you turn sync on later.")
+            Text("Everything is analysed on this phone. Audio is never uploaded — only the numbers, and only if you turn sync on later. Cadence also asks for a workout permission, which is the only way iOS can wake your watch app for you.")
                 .font(.callout).multilineTextAlignment(.center)
                 .foregroundStyle(.secondary).padding(.horizontal, 34)
             if denied {
@@ -61,45 +62,83 @@ private struct PermissionStep: View {
             }
             PrimaryButton("Allow microphone") {
                 AVAudioApplication.requestRecordPermission { granted in
-                    DispatchQueue.main.async { granted ? next() : (denied = true) }
+                    DispatchQueue.main.async {
+                        guard granted else { denied = true; return }
+                        Task {
+                            // Launching the watch app from the phone goes
+                            // through HealthKit, so ask now rather than at the
+                            // start of the first real conversation.
+                            await controller.prepareWatch()
+                            next()
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-/// Sixty seconds of you talking, once. Everything downstream depends on it,
-/// so it gets its own screen and an explicit reason.
+/// Thirty seconds of you talking, once, with something to actually read.
+/// "Just talk" produces stilted two-word bursts and a profile that only matches
+/// you when you are self-conscious — which is precisely when you do not need it.
 private struct EnrollmentStep: View {
     @EnvironmentObject var controller: SessionController
     let next: () -> Void
-    @State private var remaining = 60
+    @State private var remaining = Int(EnrollmentScript.targetDuration)
     @State private var running = false
     @State private var timer: Timer?
 
-    var body: some View {
-        VStack(spacing: 22) {
-            ZStack {
-                Circle().stroke(.white.opacity(0.08), lineWidth: 12)
-                Circle()
-                    .trim(from: 0, to: 1 - Double(remaining) / 60)
-                    .stroke(Ink.matched, style: StrokeStyle(lineWidth: 12, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                    .animation(.linear(duration: 1), value: remaining)
-                Text("\(remaining)")
-                    .font(.system(size: 54, weight: .light, design: .rounded))
-            }
-            .frame(width: 180, height: 180)
+    private var fraction: Double {
+        1 - Double(remaining) / EnrollmentScript.targetDuration
+    }
+    private var currentLine: Int { EnrollmentScript.lineIndex(atFraction: fraction) }
 
-            Text("Read anything out loud").font(.title3.weight(.semibold))
-            Text("Hold the phone the way you normally carry it — pocket, hand, on the table. Where it sits is part of what it learns, so be honest about it.")
-                .font(.callout).multilineTextAlignment(.center)
-                .foregroundStyle(.secondary).padding(.horizontal, 34)
+    var body: some View {
+        VStack(spacing: 18) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().stroke(.white.opacity(0.08), lineWidth: 7)
+                    Circle()
+                        .trim(from: 0, to: fraction)
+                        .stroke(Ink.matched, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .animation(.linear(duration: 1), value: remaining)
+                    Text("\(remaining)")
+                        .font(.system(size: 24, weight: .light, design: .rounded))
+                }
+                .frame(width: 74, height: 74)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(running ? "Keep reading" : "Read this out loud")
+                        .font(.headline)
+                    Text("Hold the phone where you normally carry it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(Array(EnrollmentScript.lines.enumerated()), id: \.offset) { i, line in
+                        Text(line)
+                            .font(.system(size: 19, weight: i == currentLine && running ? .semibold : .regular))
+                            .foregroundStyle(!running ? .primary
+                                             : (i == currentLine ? .primary
+                                                : (i < currentLine ? .tertiary : .secondary)))
+                            .animation(.easeInOut(duration: 0.3), value: currentLine)
+                    }
+                }
+                .padding(.horizontal, 26)
+                .padding(.vertical, 8)
+            }
+            .frame(maxHeight: 300)
 
             if !running {
                 PrimaryButton("Start reading") { begin() }
             } else {
-                Text("Keep talking…").font(.footnote).foregroundStyle(.tertiary)
+                Text("This happens once.")
+                    .font(.caption2).foregroundStyle(.tertiary)
             }
         }
         .onDisappear { timer?.invalidate() }

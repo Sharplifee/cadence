@@ -34,6 +34,10 @@
 
   <key>NSMicrophoneUsageDescription</key>
   <string>Cadence listens to your conversations on-device to coach your pace, volume and turn-taking. Audio never leaves this phone.</string>
+  <key>NSHealthShareUsageDescription</key>
+  <string>Cadence starts a brief mindfulness session so it can wake the watch app for you, instead of making you open it by hand.</string>
+  <key>NSHealthUpdateUsageDescription</key>
+  <string>Cadence starts a brief mindfulness session so it can wake the watch app for you, instead of making you open it by hand.</string>
   <key>UIBackgroundModes</key>
   <array><string>audio</string></array>
 
