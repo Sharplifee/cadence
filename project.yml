@@ -75,6 +75,17 @@ targets:
         # 'CFBundleIconName' is missing in the bundle". Setting the appicon name
         # is what populates it when the plist is generated.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Belt and braces. ASSETCATALOG_COMPILER_APPICON_NAME alone did NOT
+        # populate CFBundleIconName for the watch target — the shipped IPA was
+        # missing it, which is what Apple silently rejected the binary for.
+        INFOPLIST_KEY_CFBundleIconName: AppIcon
+        MARKETING_VERSION: "0.2.0"
+        CODE_SIGN_ENTITLEMENTS: CadenceWatch/CadenceWatch.entitlements
+        # A running HKWorkoutSession is what gives the watch unlimited
+        # background life and what the phone starts remotely.
+        INFOPLIST_KEY_WKBackgroundModes: workout-processing
+        INFOPLIST_KEY_NSHealthShareUsageDescription: Self Attune keeps a mindfulness session running so it can coach you for a whole conversation without being suspended.
+        INFOPLIST_KEY_NSHealthUpdateUsageDescription: Self Attune keeps a mindfulness session running so it can coach you for a whole conversation without being suspended.
         PROVISIONING_PROFILE_SPECIFIER: SelfAttune Watch CI
         INFOPLIST_KEY_CFBundleDisplayName: Cadence
         INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.connor.cadence

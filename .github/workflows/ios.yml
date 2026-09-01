@@ -152,6 +152,12 @@ jobs:
             -exportPath "$RUNNER_TEMP/export" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" | xcpretty
 
+      # 16. Catch here what Apple would otherwise reject silently three hours
+      # later with no build and no error in the pipeline.
+      - name: Verify the IPA before uploading
+        if: inputs.upload
+        run: python3 scripts/verify_ipa.py "$RUNNER_TEMP/export/Cadence.ipa"
+
       - name: Upload to TestFlight
         if: inputs.upload
         env:
