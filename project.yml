@@ -47,7 +47,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.connor.cadence
         SWIFT_VERSION: "5.9"
         CODE_SIGN_ENTITLEMENTS: Cadence/Cadence.entitlements
-        PROVISIONING_PROFILE_SPECIFIER: Cadence CI
+        PROVISIONING_PROFILE_SPECIFIER: SelfAttune CI
         TARGETED_DEVICE_FAMILY: "1"
 
   CadenceWatch:
@@ -69,7 +69,7 @@ targets:
         # one from the INFOPLIST_KEY_* settings below. Without this the build
         # dies with "Build input file cannot be found: .../CadenceWatch.app/Info.plist".
         GENERATE_INFOPLIST_FILE: YES
-        PROVISIONING_PROFILE_SPECIFIER: Cadence Watch CI
+        PROVISIONING_PROFILE_SPECIFIER: SelfAttune Watch CI
         INFOPLIST_KEY_CFBundleDisplayName: Cadence
         INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.connor.cadence
         INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp: NO

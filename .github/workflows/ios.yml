@@ -135,8 +135,8 @@ jobs:
             <key>teamID</key><string>${{ secrets.APPLE_TEAM_ID }}</string>
             <key>signingStyle</key><string>manual</string>
             <key>provisioningProfiles</key><dict>
-              <key>com.connor.cadence</key><string>Cadence CI</string>
-              <key>com.connor.cadence.watchkitapp</key><string>Cadence Watch CI</string>
+              <key>com.connor.cadence</key><string>SelfAttune CI</string>
+              <key>com.connor.cadence.watchkitapp</key><string>SelfAttune Watch CI</string>
             </dict>
           </dict></plist>
           PLIST
