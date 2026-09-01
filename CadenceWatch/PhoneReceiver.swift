@@ -12,6 +12,7 @@ public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate 
     @Published public var lastCue: CueCode = .none
     @Published public var strain: Double = 0
     @Published public var tier: Int = 1
+    @Published public var talkShare: Double = 0.5
 
     public let cuePlayer = WatchCuePlayer()
     public let runtime = WorkoutRuntime()
@@ -31,6 +32,7 @@ public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate 
     private func handle(_ bytes: [UInt8]) {
         guard let first = bytes.first, let cue = CueCode(rawValue: first) else { return }
         strain = bytes.count > 1 ? Double(bytes[1]) / 255 : strain
+        if bytes.count > 4 { talkShare = Double(bytes[4]) / 255 }
         let channels = Channels(rawValue: bytes.count > 2 ? Int(bytes[2]) : Channels.haptic.rawValue)
         tier = bytes.count > 3 ? max(1, Int(bytes[3])) : 1
 
@@ -49,6 +51,18 @@ public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate 
             lastCue = cue
         }
         cuePlayer.play(cue, channels: channels, tier: tier)
+    }
+
+    /// Control travels both ways. Reaching for your phone to start a
+    /// conversation you are already in defeats the point of the wrist.
+    public func toggleSession() {
+        guard WCSession.default.isReachable else { return }
+        WCSession.default.sendMessageData(Data([active ? CueCode.sessionEnd.rawValue
+                                                       : CueCode.sessionStart.rawValue,
+                                                0, 0, 1]),
+                                          replyHandler: nil, errorHandler: nil)
+        active.toggle()
+        if active { runtime.start() } else { runtime.stop() }
     }
 
     nonisolated public func session(_ s: WCSession,

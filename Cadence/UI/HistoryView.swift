@@ -1,3 +1,4 @@
+import AVFoundation
 import CadenceCore
 import SwiftUI
 
@@ -10,22 +11,31 @@ struct HistoryView: View {
             ZStack {
                 Ink.bg.ignoresSafeArea()
                 if sessions.isEmpty {
-                    ContentUnavailableView("No conversations yet",
-                                           systemImage: "clock.arrow.circlepath",
-                                           description: Text("Run one and it will show up here."))
+                    ContentUnavailableView {
+                        Label("No conversations yet", systemImage: "clock.arrow.circlepath")
+                    } description: {
+                        Text("Run one and it shows up here with a transcript and what to work on.")
+                    }
                 } else {
-                    ScrollView {
-                        VStack(spacing: 14) {
-                            TrendCard(sessions: sessions)
+                    List {
+                        Section {
+                            TrendCard(sessions: sessions).listRowBackground(Color.clear)
+                        }
+                        Section {
                             ForEach(sessions, id: \.id) { s in
                                 NavigationLink { SessionDetailView(summary: s) } label: {
                                     SessionRow(summary: s)
                                 }
-                                .buttonStyle(.plain)
+                                .listRowBackground(Color.clear)
+                            }
+                            .onDelete { idx in
+                                idx.map { sessions[$0].id }.forEach(store.delete)
+                                sessions.remove(atOffsets: idx)
                             }
                         }
-                        .padding(20)
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                 }
             }
             .navigationTitle("History")
@@ -44,17 +54,20 @@ struct TrendCard: View {
         guard !scored.isEmpty else { return nil }
         return scored.reduce(0, +) / Float(scored.count)
     }
+    private var avgShare: Float {
+        guard !sessions.isEmpty else { return 0.5 }
+        return sessions.map(\.talkShare).reduce(0,+) / Float(sessions.count)
+    }
 
     var body: some View {
         Card {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("You corrected after").font(.caption).foregroundStyle(.secondary)
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(rate.map { "\(Int($0 * 100))%" } ?? "—")
-                        .font(.system(size: 40, weight: .medium, design: .rounded))
-                    Text("of cues").font(.subheadline).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 24) {
+                    Stat(value: rate.map { "\(Int($0 * 100))%" } ?? "—", label: "cues corrected")
+                    Stat(value: "\(Int(avgShare * 100))%", label: "avg airtime")
+                    Stat(value: "\(sessions.count)", label: "conversations")
                 }
-                Text("Across \(sessions.count) conversations. This is the number worth moving.")
+                Text("Corrected is the one to move. It means you felt a cue and closed the gap within thirty seconds.")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
         }
@@ -68,66 +81,173 @@ struct SessionRow: View {
         Card {
             HStack {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(summary.startedAt, format: .dateTime.weekday().month().day().hour().minute())
-                        .font(.subheadline.weight(.medium))
+                    Text(summary.displayTitle).font(.subheadline.weight(.medium))
                     Text("\(Int(summary.duration / 60)) min · \(Int(summary.talkShare * 100))% yours · \(summary.cues.count) cues")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                if summary.hasAudio {
+                    Image(systemName: "waveform").font(.caption2).foregroundStyle(.tertiary)
+                }
                 Circle()
                     .fill(Ink.strainColor(Double(abs(summary.talkShare - 0.5)) * 2.8))
                     .frame(width: 10, height: 10)
-                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
             }
         }
     }
 }
 
-/// Where the learning actually happens — every cue, what triggered it, and
-/// whether you closed the gap in the thirty seconds after.
+/// Where the learning happens: what to work on, then the transcript, then every
+/// cue with the reason it fired and whether you closed the gap.
 struct SessionDetailView: View {
     let summary: SessionSummary
+    @State private var player: AVAudioPlayer?
+    @State private var playing = false
+    @State private var tab = 0
+    private let store = SessionStore()
 
     var body: some View {
         ZStack {
             Ink.bg.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 16) {
-                    Card {
-                        HStack {
-                            Stat(value: "\(Int(summary.duration / 60))m", label: "length")
-                            Spacer()
-                            Stat(value: "\(Int(summary.talkShare * 100))%", label: "your airtime")
-                            Spacer()
-                            Stat(value: "\(summary.interruptions)", label: "interruptions")
-                        }
+                    statsCard
+                    if summary.hasAudio { playbackCard }
+                    Picker("", selection: $tab) {
+                        Text("What to work on").tag(0)
+                        Text("Transcript").tag(1)
+                        Text("Cues").tag(2)
                     }
-                    ForEach(Array(summary.cues.enumerated()), id: \.offset) { _, cue in
-                        Card {
-                            HStack(alignment: .top, spacing: 14) {
-                                HapticGlyph(cue: cue.code).frame(width: 46, alignment: .leading).padding(.top, 5)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(cue.code.label).font(.subheadline.weight(.medium))
-                                    Text(reason(cue)).font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                VStack(spacing: 3) {
-                                    Text(timeString(cue.t)).font(.caption2).foregroundStyle(.tertiary)
-                                    if let corrected = cue.corrected {
-                                        Image(systemName: corrected ? "checkmark.circle.fill" : "xmark.circle")
-                                            .foregroundStyle(corrected ? Ink.matched : Ink.runaway)
-                                            .font(.caption)
-                                    }
-                                }
-                            }
-                        }
+                    .pickerStyle(.segmented)
+
+                    switch tab {
+                    case 0: findingsSection
+                    case 1: transcriptSection
+                    default: cuesSection
                     }
                 }
                 .padding(20)
             }
         }
-        .navigationTitle(summary.startedAt.formatted(.dateTime.month().day()))
+        .navigationTitle(summary.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .onDisappear { player?.stop() }
+    }
+
+    private var statsCard: some View {
+        Card {
+            HStack {
+                Stat(value: "\(Int(summary.duration / 60))m", label: "length")
+                Spacer()
+                Stat(value: "\(Int(summary.talkShare * 100))%", label: "your airtime")
+                Spacer()
+                Stat(value: "\(summary.interruptions)", label: "interruptions")
+                Spacer()
+                Stat(value: "\(summary.cues.count)", label: "cues")
+            }
+        }
+    }
+
+    private var playbackCard: some View {
+        Card {
+            HStack(spacing: 14) {
+                Button {
+                    if playing { player?.pause(); playing = false }
+                    else {
+                        if player == nil, let url = store.audioURL(for: summary.id) {
+                            player = try? AVAudioPlayer(contentsOf: url)
+                        }
+                        player?.play(); playing = true
+                    }
+                } label: {
+                    Image(systemName: playing ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 40)).foregroundStyle(Ink.matched)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Listen back").font(.subheadline.weight(.medium))
+                    Text("Stays on this phone. Nothing was uploaded.")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
+        }
+    }
+
+    private var findingsSection: some View {
+        VStack(spacing: 12) {
+            if let ins = summary.insights {
+                ForEach(Array(ins.findings.enumerated()), id: \.offset) { _, f in
+                    Card { Text(f).font(.subheadline).foregroundStyle(.primary) }
+                }
+                Card {
+                    HStack {
+                        Stat(value: "\(Int(ins.yourWPM))", label: "your wpm")
+                        Spacer()
+                        Stat(value: "\(Int(ins.theirWPM))", label: "their wpm")
+                        Spacer()
+                        Stat(value: "\(ins.questionsAsked)", label: "questions")
+                    }
+                }
+            } else {
+                Card { Text("No analysis for this conversation.").foregroundStyle(.secondary) }
+            }
+        }
+    }
+
+    private var transcriptSection: some View {
+        VStack(spacing: 10) {
+            if summary.utterances.isEmpty {
+                Card {
+                    Text("No transcript — speech recognition was unavailable for this conversation.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+            ForEach(summary.utterances) { u in
+                HStack(alignment: .top, spacing: 10) {
+                    if u.speaker == .me { Spacer(minLength: 40) }
+                    VStack(alignment: u.speaker == .me ? .trailing : .leading, spacing: 4) {
+                        Text(u.text).font(.subheadline)
+                            .frame(maxWidth: .infinity,
+                                   alignment: u.speaker == .me ? .trailing : .leading)
+                        Text("\(u.speaker == .me ? "you" : "them") · \(timeString(u.start)) · \(Int(u.wpm)) wpm")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    .padding(14)
+                    .background(u.speaker == .me ? Ink.matched.opacity(0.16) : Ink.surface,
+                                in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    if u.speaker != .me { Spacer(minLength: 40) }
+                }
+            }
+        }
+    }
+
+    private var cuesSection: some View {
+        VStack(spacing: 12) {
+            if summary.cues.isEmpty {
+                Card { Text("No cues fired — you stayed in step the whole way.")
+                        .font(.subheadline).foregroundStyle(.secondary) }
+            }
+            ForEach(Array(summary.cues.enumerated()), id: \.offset) { _, cue in
+                Card {
+                    HStack(alignment: .top, spacing: 14) {
+                        HapticGlyph(cue: cue.code).frame(width: 52, alignment: .leading).padding(.top, 5)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(cue.code.label).font(.subheadline.weight(.medium))
+                            Text(reason(cue)).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        VStack(spacing: 3) {
+                            Text(timeString(cue.t)).font(.caption2).foregroundStyle(.tertiary)
+                            if let corrected = cue.corrected {
+                                Image(systemName: corrected ? "checkmark.circle.fill" : "xmark.circle")
+                                    .foregroundStyle(corrected ? Ink.matched : Ink.runaway)
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func reason(_ c: CueEvent) -> String {

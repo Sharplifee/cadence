@@ -34,8 +34,8 @@ private struct WelcomeStep: View {
         VStack(spacing: 22) {
             Image(systemName: "waveform.circle")
                 .font(.system(size: 72)).foregroundStyle(Ink.matched)
-            Text("Cadence").font(.largeTitle.weight(.semibold))
-            Text("It listens to the conversation, works out how fast and loud the other person is, and taps your wrist when you have run ahead of them. Nobody else knows.")
+            Text("Self Attune").font(.largeTitle.weight(.semibold))
+            Text("It listens, works out how fast and loud the other person is, and taps your wrist when you have run ahead of them. Afterwards you get the transcript and what to work on. Nobody else in the room knows.")
                 .font(.callout).multilineTextAlignment(.center)
                 .foregroundStyle(.secondary).padding(.horizontal, 34)
             PrimaryButton("Get started", action: next)
@@ -51,8 +51,8 @@ private struct PermissionStep: View {
     var body: some View {
         VStack(spacing: 22) {
             Image(systemName: "mic.circle").font(.system(size: 72)).foregroundStyle(Ink.them)
-            Text("Microphone").font(.title2.weight(.semibold))
-            Text("Everything is analysed on this phone. Audio is never uploaded — only the numbers, and only if you turn sync on later. Cadence also asks for a workout permission, which is the only way iOS can wake your watch app for you.")
+            Text("Permissions").font(.title2.weight(.semibold))
+            Text("Three prompts follow: the microphone, speech recognition for the transcript, and a workout permission — the only way iOS can wake your watch app for you. Everything is analysed and transcribed on this phone. Audio never leaves it.")
                 .font(.callout).multilineTextAlignment(.center)
                 .foregroundStyle(.secondary).padding(.horizontal, 34)
             if denied {
@@ -60,14 +60,16 @@ private struct PermissionStep: View {
                     .font(.caption).foregroundStyle(Ink.runaway).padding(.horizontal, 34)
                     .multilineTextAlignment(.center)
             }
-            PrimaryButton("Allow microphone") {
+            PrimaryButton("Continue") {
                 AVAudioApplication.requestRecordPermission { granted in
                     DispatchQueue.main.async {
                         guard granted else { denied = true; return }
                         Task {
-                            // Launching the watch app from the phone goes
-                            // through HealthKit, so ask now rather than at the
-                            // start of the first real conversation.
+                            // Both of these prompt, so get them out of the way
+                            // here rather than at the start of a real
+                            // conversation. Launching the watch app from the
+                            // phone goes through HealthKit.
+                            _ = await SessionController.requestTranscriptionPermission()
                             await controller.prepareWatch()
                             next()
                         }

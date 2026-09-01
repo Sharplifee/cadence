@@ -34,6 +34,8 @@
 
   <key>NSMicrophoneUsageDescription</key>
   <string>Cadence listens to your conversations on-device to coach your pace, volume and turn-taking. Audio never leaves this phone.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Self Attune transcribes your conversations entirely on this phone so you can read back how you actually spoke. Nothing is uploaded.</string>
   <key>NSHealthShareUsageDescription</key>
   <string>Cadence starts a brief mindfulness session so it can wake the watch app for you, instead of making you open it by hand.</string>
   <key>NSHealthUpdateUsageDescription</key>

@@ -23,6 +23,7 @@ struct WatchRootView: View {
             TabView {
                 WatchLiveView()
                 WatchLegendView()
+                WatchHelpView()
             }
             .tabViewStyle(.verticalPage)
 
@@ -48,20 +49,26 @@ struct WatchLiveView: View {
                 .stroke(strainColor, style: StrokeStyle(lineWidth: 10, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(.easeInOut(duration: 0.7), value: receiver.strain)
-            VStack(spacing: 2) {
-                Image(systemName: receiver.active ? "waveform" : "waveform.slash")
-                    .font(.system(size: 22))
-                    .foregroundStyle(receiver.active ? strainColor : .secondary)
-                Text(receiver.active ? "listening" : "off")
-                    .font(.caption2).foregroundStyle(.secondary)
+            VStack(spacing: 1) {
+                if receiver.active {
+                    Text("\(Int(receiver.talkShare * 100))")
+                        .font(.system(size: 30, weight: .medium, design: .rounded))
+                    Text("% yours").font(.system(size: 10)).foregroundStyle(.secondary)
+                } else {
+                    Image(systemName: "waveform.slash")
+                        .font(.system(size: 22)).foregroundStyle(.secondary)
+                    Text("off").font(.caption2).foregroundStyle(.secondary)
+                }
                 if receiver.lastCue != .none && receiver.active {
                     Text(receiver.lastCue.label)
-                        .font(.system(size: 11, weight: .medium))
-                        .multilineTextAlignment(.center).padding(.top, 3)
+                        .font(.system(size: 10, weight: .medium))
+                        .multilineTextAlignment(.center).padding(.top, 2)
                 }
             }
         }
         .padding(6)
+        // Tapping the ring starts or stops the whole thing, phone included.
+        .onTapGesture { receiver.toggleSession() }
     }
 
     private var strainColor: Color {
@@ -102,5 +109,28 @@ struct WatchGlyph: View {
             }
         }
         .frame(width: 40, alignment: .leading)
+    }
+}
+
+/// The wrist needs to answer "what do I do now" without the phone.
+struct WatchHelpView: View {
+    @EnvironmentObject var receiver: PhoneReceiver
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Tap the ring").font(.system(size: 14, weight: .semibold))
+                Text("Starts or ends the conversation on both devices.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                Divider()
+                Text("The ring").font(.system(size: 14, weight: .semibold))
+                Text("Full and green means you are matched to them. It opens and warms as you pull ahead.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                Divider()
+                Text("If it buzzes twice").font(.system(size: 14, weight: .semibold))
+                Text("Slow down. Once long: quieter. Three quick: let them talk. Sharp double: you cut them off.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 4)
+        }
     }
 }

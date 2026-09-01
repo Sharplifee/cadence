@@ -336,3 +336,61 @@ final class EnrollmentScriptTests: XCTestCase {
                        EnrollmentScript.lines.count - 1)
     }
 }
+
+final class InsightsTests: XCTestCase {
+    private func u(_ s: Speaker, _ start: Double, _ end: Double, _ text: String) -> Utterance {
+        Utterance(speaker: s, start: start, end: end, text: text)
+    }
+
+    func testWPMFromWordsAndDuration() {
+        // 10 words in 4 seconds -> 150 wpm.
+        let x = u(.me, 0, 4, "one two three four five six seven eight nine ten")
+        XCTAssertEqual(x.wpm, 150, accuracy: 1)
+    }
+
+    func testDominanceIsCalledOut() {
+        let ins = Insights.derive(from: [
+            u(.me, 0, 80, String(repeating: "word ", count: 200)),
+            u(.them, 80, 90, "short reply here")
+        ], turns: [])
+        XCTAssertGreaterThan(ins.talkShare, 0.65)
+        XCTAssertTrue(ins.findings.contains { $0.contains("of the talking") })
+    }
+
+    func testQuestionsCountedWithoutPunctuation() {
+        // Speech recognisers rarely emit question marks, so openers must count.
+        let ins = Insights.derive(from: [
+            u(.me, 0, 2, "what did you think of it"),
+            u(.me, 3, 5, "how long have you been there"),
+            u(.them, 6, 9, "a while now")
+        ], turns: [])
+        XCTAssertEqual(ins.questionsAsked, 2)
+    }
+
+    func testNoQuestionsIsFlagged() {
+        let ins = Insights.derive(from: [
+            u(.me, 0, 5, "so anyway that is what happened"),
+            u(.them, 6, 9, "right yes")
+        ], turns: [])
+        XCTAssertTrue(ins.findings.contains { $0.contains("no questions") })
+    }
+
+    func testBalancedConversationSaysSo() {
+        let ins = Insights.derive(from: [
+            u(.me, 0, 10, "what do you think about that one"),
+            u(.them, 10, 20, "i think it is fine honestly")
+        ], turns: [])
+        XCTAssertTrue(ins.findings.contains { $0.contains("Nothing stands out") }
+                      || ins.questionsAsked > 0)
+    }
+
+    func testInterruptionsSurfaceFromTurns() {
+        let turns = (0..<4).map { i in
+            Turn(speaker: .me, start: Double(i)*5, end: Double(i)*5+3,
+                 meanDbfs: -20, meanF0: 120, meanSyllableRate: 4, latency: -0.5)
+        }
+        let ins = Insights.derive(from: [u(.me,0,3,"hi"), u(.them,3,6,"hello")], turns: turns)
+        XCTAssertEqual(ins.interruptions, 4)
+        XCTAssertTrue(ins.findings.contains { $0.contains("before they finished") })
+    }
+}

@@ -90,13 +90,29 @@ public struct SessionSummary: Codable, Sendable {
     public var interruptions: Int
     public var cues: [CueEvent]
     public var correctionRate: Float?
+    /// User-supplied. "Coffee with Dylan" is worth infinitely more at review
+    /// time than a timestamp.
+    public var title: String?
+    public var utterances: [Utterance]
+    public var insights: Insights?
+    /// Whether the audio file is still on disk next to this summary.
+    public var hasAudio: Bool
 
     public init(id: UUID, startedAt: Date, duration: TimeInterval,
                 talkShare: Float, interruptions: Int, cues: [CueEvent],
-                correctionRate: Float?) {
+                correctionRate: Float?, title: String? = nil,
+                utterances: [Utterance] = [], insights: Insights? = nil,
+                hasAudio: Bool = false) {
         self.id = id; self.startedAt = startedAt; self.duration = duration
         self.talkShare = talkShare; self.interruptions = interruptions
         self.cues = cues; self.correctionRate = correctionRate
+        self.title = title; self.utterances = utterances
+        self.insights = insights; self.hasAudio = hasAudio
+    }
+
+    public var displayTitle: String {
+        if let t = title, !t.isEmpty { return t }
+        return startedAt.formatted(.dateTime.weekday(.wide).hour().minute())
     }
 }
 

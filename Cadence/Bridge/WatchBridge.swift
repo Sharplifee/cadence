@@ -8,6 +8,9 @@ public final class WatchBridge: NSObject, WCSessionDelegate {
     private var session: WCSession? { WCSession.isSupported() ? WCSession.default : nil }
     private var lastStrainSend = Date.distantPast
 
+    /// Called when the watch asks the phone to start or stop.
+    public var onRemoteToggle: ((Bool) -> Void)?
+
     public override init() {
         super.init()
         guard let session else { return }
@@ -19,12 +22,14 @@ public final class WatchBridge: NSObject, WCSessionDelegate {
     public var isWatchAppInstalled: Bool { session?.isWatchAppInstalled ?? false }
 
     public func send(_ cue: CueCode, strain: Double = 0,
-                     channels: Channels = .silent, tier: Int = 1) {
+                     channels: Channels = .silent, tier: Int = 1,
+                     talkShare: Double = 0.5) {
         guard let session, session.isReachable else { return }
         let payload = Data([cue.rawValue,
                             UInt8(min(max(strain, 0), 1) * 255),
                             UInt8(clamping: channels.rawValue),
-                            UInt8(clamping: tier)])
+                            UInt8(clamping: tier),
+                            UInt8(min(max(talkShare, 0), 1) * 255)])
         // Fire and forget: a dropped cue beats a queued one arriving thirty
         // seconds after the moment it was about.
         session.sendMessageData(payload, replyHandler: nil, errorHandler: nil)
@@ -36,6 +41,15 @@ public final class WatchBridge: NSObject, WCSessionDelegate {
         guard Date().timeIntervalSince(lastStrainSend) > 4 else { return }
         lastStrainSend = Date()
         send(.none, strain: strain)
+    }
+
+    public func session(_ s: WCSession, didReceiveMessageData data: Data) {
+        guard let first = data.first, let cue = CueCode(rawValue: first) else { return }
+        switch cue {
+        case .sessionStart: DispatchQueue.main.async { self.onRemoteToggle?(true) }
+        case .sessionEnd:   DispatchQueue.main.async { self.onRemoteToggle?(false) }
+        default: break
+        }
     }
 
     public func session(_ s: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {}

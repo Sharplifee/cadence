@@ -87,11 +87,11 @@ struct SettingsView: View {
 
                 Stepper("Sound from cue \(controller.settings.escalation.tier2At)",
                         value: Binding(get: { controller.settings.escalation.tier2At },
-                                       set: { controller.settings.escalation.tier2At = min($0, controller.settings.escalation.tier3At - 1) }),
+                                       set: { controller.settings.escalation.tier2At = min($0, controller.settings.escalation.tier3At - 1); controller.persistSettings() }),
                         in: 2...9).font(.subheadline)
                 Stepper("Flash from cue \(controller.settings.escalation.tier3At)",
                         value: Binding(get: { controller.settings.escalation.tier3At },
-                                       set: { controller.settings.escalation.tier3At = max($0, controller.settings.escalation.tier2At + 1) }),
+                                       set: { controller.settings.escalation.tier3At = max($0, controller.settings.escalation.tier2At + 1); controller.persistSettings() }),
                         in: 3...12).font(.subheadline)
 
                 Text("Correcting after a cue drops you back to tier 1. The ladder responds to being ignored, not to being imperfect.")
@@ -169,7 +169,7 @@ struct SettingsView: View {
                     if on { s.insert(d) } else { s.remove(d) }
                     // Removing the last device would silently disable the app.
                     if s.isEmpty { s = d == .phone ? .watch : .phone }
-                    controller.settings.devices = s
+                    controller.settings.devices = s; controller.persistSettings()
                 })
     }
 
@@ -179,7 +179,7 @@ struct SettingsView: View {
                     var s = controller.settings.allowed
                     if on { s.insert(c) } else { s.remove(c) }
                     if s.isEmpty { s = [.haptic] }
-                    controller.settings.allowed = s
+                    controller.settings.allowed = s; controller.persistSettings()
                 })
     }
 
