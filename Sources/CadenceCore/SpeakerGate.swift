@@ -9,9 +9,28 @@ import Foundation
 /// Phase 1 swaps in a speaker-verification embedding behind the same protocol —
 /// nothing downstream changes.
 public protocol SpeakerClassifier {
+    /// Persisted between launches. Without this the app is unusable after the
+    /// first relaunch: onboarding is marked complete, the profile is gone, and
+    /// every attempt to start reports "record your voice profile first".
+    var profile: VoiceProfile? { get }
+    mutating func restore(_ profile: VoiceProfile)
     func classify(dbfs: Float, centroid: Float, f0: Float) -> Speaker
     mutating func enroll(dbfs: Float, centroid: Float, f0: Float)
     var isCalibrated: Bool { get }
+}
+
+/// The learned voice profile, small enough to sit in UserDefaults.
+public struct VoiceProfile: Codable, Sendable, Equatable {
+    public var dbfs: Float
+    public var centroid: Float
+    public var f0: Float
+    public var samples: Int
+    public var recordedAt: Date
+
+    public init(dbfs: Float, centroid: Float, f0: Float, samples: Int, recordedAt: Date = Date()) {
+        self.dbfs = dbfs; self.centroid = centroid; self.f0 = f0
+        self.samples = samples; self.recordedAt = recordedAt
+    }
 }
 
 public struct NearFieldClassifier: SpeakerClassifier {
@@ -28,7 +47,21 @@ public struct NearFieldClassifier: SpeakerClassifier {
 
     public init() {}
 
+    public init(profile: VoiceProfile) {
+        myDbfs = profile.dbfs; myCentroid = profile.centroid
+        myF0 = profile.f0; samples = profile.samples
+    }
+
     public var isCalibrated: Bool { samples >= requiredSamples }
+
+    public var profile: VoiceProfile? {
+        isCalibrated ? VoiceProfile(dbfs: myDbfs, centroid: myCentroid,
+                                    f0: myF0, samples: samples) : nil
+    }
+
+    public mutating func restore(_ p: VoiceProfile) {
+        myDbfs = p.dbfs; myCentroid = p.centroid; myF0 = p.f0; samples = p.samples
+    }
 
     public mutating func enroll(dbfs: Float, centroid: Float, f0: Float) {
         samples += 1

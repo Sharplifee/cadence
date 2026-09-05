@@ -394,3 +394,146 @@ final class InsightsTests: XCTestCase {
         XCTAssertTrue(ins.findings.contains { $0.contains("before they finished") })
     }
 }
+
+final class VoiceProfilePersistenceTests: XCTestCase {
+    private func enrolled() -> NearFieldClassifier {
+        var c = NearFieldClassifier()
+        for _ in 0..<80 { c.enroll(dbfs: -18, centroid: 800, f0: 115) }
+        return c
+    }
+
+    func testProfileIsNilBeforeCalibration() {
+        XCTAssertNil(NearFieldClassifier().profile)
+    }
+
+    func testProfileSurvivesARoundTrip() throws {
+        let original = enrolled()
+        let profile = try XCTUnwrap(original.profile)
+        let data = try JSONEncoder().encode(profile)
+        let decoded = try JSONDecoder().decode(VoiceProfile.self, from: data)
+
+        var restored = NearFieldClassifier()
+        restored.restore(decoded)
+        XCTAssertTrue(restored.isCalibrated,
+                      "a restored profile must not require re-enrollment")
+        // And it must classify identically, not merely claim to be calibrated.
+        for (db, cen, f0) in [(Float(-17), Float(820), Float(118)),
+                              (Float(-34), Float(1600), Float(210))] {
+            XCTAssertEqual(restored.classify(dbfs: db, centroid: cen, f0: f0),
+                           original.classify(dbfs: db, centroid: cen, f0: f0))
+        }
+    }
+
+    func testInitFromProfileMatchesRestore() throws {
+        let profile = try XCTUnwrap(enrolled().profile)
+        let a = NearFieldClassifier(profile: profile)
+        var b = NearFieldClassifier(); b.restore(profile)
+        XCTAssertEqual(a.classify(dbfs: -17, centroid: 820, f0: 118),
+                       b.classify(dbfs: -17, centroid: 820, f0: 118))
+        XCTAssertTrue(a.isCalibrated)
+    }
+}
+
+final class TranscriptAssemblerTests: XCTestCase {
+    func testAttributesBySpeakerChange() {
+        let a = TranscriptAssembler()
+        a.observe(speaker: .me, dbfs: -20, at: 1)
+        a.update(text: "hello there how are you", speaker: .them, at: 3)
+        XCTAssertEqual(a.utterances.count, 1)
+        XCTAssertEqual(a.utterances[0].speaker, .me)
+        XCTAssertEqual(a.utterances[0].text, "hello there how are you")
+    }
+
+    func testOnlyNewTextIsCommittedAsTheRecogniserGrows() {
+        let a = TranscriptAssembler()
+        a.observe(speaker: .me, dbfs: -20, at: 1)
+        a.update(text: "first part", speaker: .them, at: 3)
+        a.observe(speaker: .them, dbfs: -25, at: 4)
+        a.update(text: "first part second part", speaker: .me, at: 6)
+        XCTAssertEqual(a.utterances.count, 2)
+        XCTAssertEqual(a.utterances[1].text, "second part",
+                       "the second utterance must not repeat the first")
+    }
+
+    /// The regression that silently killed transcription 50 seconds in.
+    func testSurvivesARecogniserRestart() {
+        let a = TranscriptAssembler()
+        a.observe(speaker: .me, dbfs: -20, at: 1)
+        a.update(text: "a long first minute of speech", speaker: .them, at: 5)
+        XCTAssertEqual(a.utterances.count, 1)
+
+        a.recognizerRestarted(at: 50, finalText: "a long first minute of speech")
+
+        // New task: text starts from empty again.
+        a.observe(speaker: .me, dbfs: -20, at: 52)
+        a.update(text: "words after the restart", speaker: .them, at: 55)
+        XCTAssertEqual(a.utterances.count, 2)
+        XCTAssertEqual(a.utterances.last?.text, "words after the restart",
+                       "text after a recogniser restart must still be captured")
+    }
+
+    func testRevisedTextDoesNotProduceSilence() {
+        let a = TranscriptAssembler()
+        a.observe(speaker: .me, dbfs: -20, at: 1)
+        a.update(text: "recognise this", speaker: .them, at: 3)
+        a.observe(speaker: .them, dbfs: -20, at: 4)
+        // Recogniser revised the earlier words rather than appending.
+        a.update(text: "completely different wording", speaker: .me, at: 6)
+        XCTAssertEqual(a.utterances.count, 2)
+        XCTAssertFalse(a.utterances[1].text.isEmpty)
+    }
+
+    func testSilenceNeverBecomesAnUtterance() {
+        let a = TranscriptAssembler()
+        a.observe(speaker: .silence, dbfs: -70, at: 1)
+        a.update(text: "ghost text", speaker: .silence, at: 2)
+        XCTAssertTrue(a.utterances.isEmpty)
+    }
+
+    func testResetClearsEverything() {
+        let a = TranscriptAssembler()
+        a.observe(speaker: .me, dbfs: -20, at: 1)
+        a.update(text: "something", speaker: .them, at: 3)
+        a.reset()
+        XCTAssertTrue(a.utterances.isEmpty)
+        a.observe(speaker: .me, dbfs: -20, at: 1)
+        a.finish(text: "fresh", at: 2)
+        XCTAssertEqual(a.utterances.first?.text, "fresh")
+    }
+}
+
+final class FrameAnalyzerTests: XCTestCase {
+    private let sr: Float = 16_000
+
+    private func tone(_ hz: Float, amp: Float = 0.5, seconds: Float = 0.5) -> [Float] {
+        (0..<Int(sr * seconds)).map { amp * sin(2 * .pi * hz * Float($0) / sr) }
+    }
+
+    func testSilenceSkipsTheExpensiveWork() {
+        let vad = VoiceActivity()
+        let a = FrameAnalyzer(sampleRate: sr)
+        let r = a.analyze([Float](repeating: 0, count: 8000), vad: vad)
+        XCTAssertFalse(r.isSpeech)
+        XCTAssertEqual(r.f0, 0)
+        XCTAssertEqual(r.centroid, 0)
+        XCTAssertEqual(r.syllableRate, 0)
+    }
+
+    func testVoicedFrameProducesEveryFeature() {
+        let vad = VoiceActivity()
+        let a = FrameAnalyzer(sampleRate: sr)
+        for _ in 0..<40 { _ = a.analyze([Float](repeating: 0.0001, count: 8000), vad: vad) }
+        let r = a.analyze(tone(150), vad: vad)
+        XCTAssertTrue(r.isSpeech)
+        XCTAssertEqual(r.f0, 150, accuracy: 10)
+        XCTAssertGreaterThan(r.centroid, 0)
+        XCTAssertEqual(r.dbfs, -9.03, accuracy: 0.3)
+    }
+
+    func testAnalyzerIsPureAcrossRepeatedCalls() {
+        let a = FrameAnalyzer(sampleRate: sr)
+        let vad1 = VoiceActivity(), vad2 = VoiceActivity()
+        let x = tone(200)
+        XCTAssertEqual(a.analyze(x, vad: vad1).f0, a.analyze(x, vad: vad2).f0)
+    }
+}

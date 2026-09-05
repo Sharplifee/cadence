@@ -1,3 +1,4 @@
+import AVFoundation
 import CadenceCore
 import Combine
 import Foundation
@@ -23,6 +24,7 @@ public final class SessionController: ObservableObject {
 
     @Published public var settings = CueSettings()
     @Published public private(set) var watchReady = false
+    @Published public private(set) var isEnrolled = false
 
     public var metronomeEnabled: Bool {
         get { settings.metronomeEnabled }
@@ -31,6 +33,9 @@ public final class SessionController: ObservableObject {
 
     private let capture = AudioCapture()
     private let vad = VoiceActivity()
+    private let analyzer = FrameAnalyzer(sampleRate: Float(AudioCapture.sampleRate))
+    private let dspQueue = DispatchQueue(label: "cadence.dsp", qos: .userInitiated)
+    private let assembler = TranscriptAssembler()
     private var classifier: SpeakerClassifier = NearFieldClassifier()
     private let turns = TurnTracker()
     private let engine = DivergenceEngine()
@@ -51,18 +56,29 @@ public final class SessionController: ObservableObject {
     private var frames: [Frame] = []
     private var lastTick: TimeInterval = 0
     private var sessionDir: URL?
-    private var utteranceStart: TimeInterval = 0
-    private var utteranceSpeaker: Speaker = .silence
-    private var lastCommittedText = ""
     private var lastRecognizerRestart: TimeInterval = 0
-    private var frameLevels: [Float] = []
+    private var scoredCueCount = 0
+    private var lastScoredCorrection = -1
 
     public init() {
+        // DSP runs on the audio-processing queue; only the finished numbers
+        // hop to the main actor. Doing the FFT and autocorrelation on the main
+        // actor competed with SwiftUI for exactly the frames it was animating.
         capture.onFrame = { [weak self] samples in
-            Task { @MainActor in self?.handle(samples) }
+            guard let self else { return }
+            self.dspQueue.async {
+                let r = self.analyzer.analyze(samples, vad: self.vad)
+                Task { @MainActor in self.apply(r, samples: samples) }
+            }
         }
         policy.applySensitivity(0.5)
         settings = SettingsStore.load()
+
+        // Restore the voice profile, or the app relaunches into a dead state.
+        if let p = VoiceProfileStore.load() {
+            classifier.restore(p)
+            isEnrolled = true
+        }
 
         // Start/stop from the wrist drives the phone, not just the reverse.
         watch.onRemoteToggle = { [weak self] start in
@@ -72,9 +88,7 @@ public final class SessionController: ObservableObject {
         }
 
         transcriber.onPartial = { [weak self] text in
-            guard let self else { return }
-            self.liveText = text
-            self.commitIfSpeakerChanged(text: text)
+            self?.ingestRecognizedText(text)
         }
     }
 
@@ -123,18 +137,35 @@ public final class SessionController: ObservableObject {
     public func finishEnrollment() {
         isEnrolling = false
         capture.stop()
+        if let p = classifier.profile {
+            VoiceProfileStore.save(p)
+            isEnrolled = true
+        }
+    }
+
+    public func clearEnrollment() {
+        VoiceProfileStore.clear()
+        classifier = NearFieldClassifier()
+        isEnrolled = false
     }
 
     public func start() throws {
+        guard AVAudioApplication.shared.recordPermission == .granted else {
+            throw NSError(domain: "Cadence", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "Microphone access is off. Turn it on in iOS Settings, Self Attune, Microphone."
+            ])
+        }
         guard classifier.isCalibrated else {
             throw NSError(domain: "Cadence", code: 2, userInfo: [
-                NSLocalizedDescriptionKey: "Record your voice profile first — Settings, then Re-record."
+                NSLocalizedDescriptionKey: "Record your voice profile first — Settings, then Re-record voice profile."
             ])
         }
         sessionID = UUID(); startedAt = Date()
         frameIndex = 0; frames.removeAll(); elapsed = 0
         lastCue = .none; divergence = .matched
-        utterances.removeAll(); liveText = ""; lastCommittedText = ""
+        assembler.reset(); utterances.removeAll(); liveText = ""
+        scoredCueCount = 0; lastScoredCorrection = -1
+        lastRecognizerRestart = 0
         warning = nil
         escalation.reset()
 
@@ -173,7 +204,8 @@ public final class SessionController: ObservableObject {
     public func stop() {
         capture.stop()
         transcriber.stop(); transcribing = false
-        commitUtterance(at: elapsed)
+        assembler.finish(text: liveText, at: elapsed)
+        utterances = assembler.utterances
         let hasAudio = recorder.finish()
         watch.send(.sessionEnd, strain: 0, channels: .silent, tier: 1)
         isRunning = false
@@ -197,48 +229,43 @@ public final class SessionController: ObservableObject {
 
     // MARK: - Frame pipeline
 
-    private func handle(_ samples: [Float]) {
-        let sr = Float(AudioCapture.sampleRate)
-        let db = DSP.rmsDBFS(samples)
-        let zcr = DSP.zeroCrossingRate(samples)
-        let speech = vad.isSpeech(dbfs: db, zcr: zcr)
-        let f0 = speech ? DSP.fundamental(samples, sampleRate: sr) : 0
-        let centroid = speech ? DSP.spectralCentroid(samples, sampleRate: sr) : 0
-
+    /// Runs on the main actor with the DSP already done.
+    private func apply(_ r: FrameAnalyzer.Result, samples: [Float]) {
         if isEnrolling {
-            if speech { classifier.enroll(dbfs: db, centroid: centroid, f0: f0) }
+            if r.isSpeech {
+                classifier.enroll(dbfs: r.dbfs, centroid: r.centroid, f0: r.f0)
+            }
+            level = r.dbfs
             return
         }
 
         frameIndex += 1
         let t = Double(frameIndex) * AudioCapture.frameSeconds
         elapsed = t
+        level = r.dbfs
 
-        let speaker: Speaker = speech
-            ? classifier.classify(dbfs: db, centroid: centroid, f0: f0)
+        let speaker: Speaker = r.isSpeech
+            ? classifier.classify(dbfs: r.dbfs, centroid: r.centroid, f0: r.f0)
             : .silence
-
-        level = db
         currentSpeaker = speaker
+
         recorder.append(samples)
         transcriber.append(samples, sampleRate: AudioCapture.sampleRate)
+        assembler.observe(speaker: speaker, dbfs: r.dbfs, at: t)
 
-        // SFSpeechRecognizer stops silently after about a minute per task, so
-        // it is cycled on a speaker change rather than mid-sentence.
+        // SFSpeechRecognizer stops silently after roughly a minute per task.
+        // Cycle it during a pause, and tell the assembler — its committed
+        // prefix must reset with it or every later utterance comes out empty.
         if t - lastRecognizerRestart > 50, speaker == .silence, transcribing {
             lastRecognizerRestart = t
-            commitUtterance(at: t)
+            assembler.recognizerRestarted(at: t, finalText: liveText)
+            utterances = assembler.utterances
+            liveText = ""
             transcriber.restart()
         }
 
-        if speaker != .silence, utteranceSpeaker == .silence {
-            utteranceSpeaker = speaker; utteranceStart = t; frameLevels = []
-        }
-        if speaker != .silence { frameLevels.append(db) }
-
-        let frame = Frame(t: t, speaker: speaker, dbfs: db, f0: f0,
-                          syllableRate: speech ? DSP.syllableRate(samples, sampleRate: sr) : 0,
-                          centroid: centroid)
+        let frame = Frame(t: t, speaker: speaker, dbfs: r.dbfs, f0: r.f0,
+                          syllableRate: r.syllableRate, centroid: r.centroid)
         frames.append(frame)
 
         if let finished = turns.ingest(frame) { engine.ingest(finished) }
@@ -252,45 +279,36 @@ public final class SessionController: ObservableObject {
             lastCue = cue
             let step = escalation.register(at: t)
             deliver(cue, channels: step.channels, tier: step.tier)
+            scoredCueCount = policy.events.count
         } else if settings.metronomeEnabled,
-                  let cadence = engine.theirCadence(), t - lastTick >= cadence {
+                  let cadence = engine.theirCadence(),
+                  t - lastTick >= max(cadence, 2.0) {
             lastTick = t
             deliver(.metronomeTick, channels: [.haptic], tier: 1)
         } else {
             watch.sendStrain(d.strain)
         }
 
-        // Acting on a cue drops you back to a private nudge. The ladder is a
-        // response to being ignored, not to being imperfect.
-        if policy.events.last?.corrected == true { escalation.registerCorrection() }
+        // Only credit a correction once per cue, not on every frame after it.
+        if policy.events.count == scoredCueCount,
+           let last = policy.events.last, last.corrected == true,
+           lastScoredCorrection != scoredCueCount {
+            lastScoredCorrection = scoredCueCount
+            escalation.registerCorrection()
+        }
     }
 }
 
-
-// MARK: - Transcript assembly
+// MARK: - Transcript
 
 extension SessionController {
-    /// The recogniser has no idea who is talking; the speaker gate does. A
-    /// change of speaker is what closes an utterance and starts the next.
-    fileprivate func commitIfSpeakerChanged(text: String) {
-        guard currentSpeaker != .silence, utteranceSpeaker != .silence,
-              currentSpeaker != utteranceSpeaker else { return }
-        commitUtterance(at: elapsed)
-        utteranceSpeaker = currentSpeaker
-        utteranceStart = elapsed
-    }
-
-    fileprivate func commitUtterance(at t: TimeInterval) {
-        let newText = String(liveText.dropFirst(lastCommittedText.count))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        defer { lastCommittedText = liveText; frameLevels = [] }
-        guard utteranceSpeaker != .silence, !newText.isEmpty, t > utteranceStart else {
-            utteranceSpeaker = .silence
-            return
+    /// The recogniser produced new text. Attribution is the speaker gate's job,
+    /// not the recogniser's — it has no idea who is talking.
+    fileprivate func ingestRecognizedText(_ text: String) {
+        liveText = text
+        assembler.update(text: text, speaker: currentSpeaker, at: elapsed)
+        if assembler.utterances.count != utterances.count {
+            utterances = assembler.utterances
         }
-        let meanDb = frameLevels.isEmpty ? 0 : frameLevels.reduce(0,+) / Float(frameLevels.count)
-        utterances.append(Utterance(speaker: utteranceSpeaker, start: utteranceStart,
-                                    end: t, text: newText, meanDbfs: meanDb))
-        utteranceSpeaker = .silence
     }
 }

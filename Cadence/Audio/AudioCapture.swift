@@ -21,6 +21,12 @@ public final class AudioCapture {
     public func start() throws {
         // .mixWithOthers is the whole reason music keeps playing.
         // .allowBluetooth lets AirPods act as the near-field mic when present.
+        //
+        // .measurement is load-bearing, not incidental: it disables automatic
+        // gain control. With AGC on, iOS normalises the two voices toward each
+        // other, which erases the loudness difference the speaker gate and the
+        // volume cue both depend on. Do not "fix" this to .default — it makes
+        // alert tones louder and the app wrong.
         try session.setCategory(.playAndRecord,
                                 mode: .measurement,
                                 options: [.mixWithOthers, .allowBluetooth, .defaultToSpeaker])

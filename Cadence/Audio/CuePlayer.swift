@@ -78,7 +78,7 @@ public final class CuePlayer {
                 let t = Double(i) / sr
                 // Short attack/release envelope, or each pulse clicks.
                 let env = min(min(t, on - t) / 0.008, 1.0)
-                samples.append(Float(sin(2 * .pi * freq * t) * env * 0.35))
+                samples.append(Float(sin(2 * .pi * freq * t) * env * 0.85))
             }
         }
         guard !samples.isEmpty else { return }
@@ -104,17 +104,18 @@ public final class CuePlayer {
     /// it is the only channel other people in the room can notice.
     private func playTorch(_ pattern: CuePattern) {
         guard let device = AVCaptureDevice.default(for: .video), device.hasTorch else { return }
-        for (at, on) in pattern.schedule {
-            DispatchQueue.main.asyncAfter(deadline: .now() + at) {
-                try? device.lockForConfiguration()
-                try? device.setTorchModeOn(level: 1.0)
-                device.unlockForConfiguration()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + at + on) {
-                try? device.lockForConfiguration()
-                device.torchMode = .off
-                device.unlockForConfiguration()
-            }
+        // Unlocking a device that was never locked is undefined behaviour, so
+        // the lock has to actually be checked rather than swallowed with try?.
+        func setTorch(_ on: Bool) {
+            guard (try? device.lockForConfiguration()) != nil else { return }
+            defer { device.unlockForConfiguration() }
+            if on { try? device.setTorchModeOn(level: 1.0) } else { device.torchMode = .off }
         }
+        for (at, on) in pattern.schedule {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { setTorch(true) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + at + on) { setTorch(false) }
+        }
+        // Never leave the torch burning if a pulse is dropped.
+        DispatchQueue.main.asyncAfter(deadline: .now() + pattern.duration + 0.4) { setTorch(false) }
     }
 }

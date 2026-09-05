@@ -156,7 +156,10 @@ struct SettingsView: View {
                 Text("Your voice profile").font(.subheadline.weight(.medium))
                 Text("Recorded once. Redo it only if separation gets unreliable — a new case, a different pocket, or a bad cold all change how you sound to the phone.")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("Re-record voice profile") { hasEnrolled = false }
+                Button("Re-record voice profile") {
+                    controller.clearEnrollment()
+                    hasEnrolled = false
+                }
                     .font(.subheadline).foregroundStyle(Ink.drifting)
             }
         }

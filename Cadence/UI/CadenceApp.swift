@@ -9,7 +9,9 @@ struct CadenceApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if hasEnrolled {
+                // Both must hold. hasEnrolled alone let the app launch into a
+                // state where starting always failed.
+                if hasEnrolled && controller.isEnrolled {
                     HomeView()
                 } else {
                     OnboardingFlow(onComplete: { hasEnrolled = true })
