@@ -168,11 +168,26 @@ jobs:
           mkdir -p ~/.appstoreconnect/private_keys
           echo "$ASC_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
 
-          set +e
-          xcrun altool --upload-app -f "$RUNNER_TEMP/export/Cadence.ipa" -t ios \
-            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1 | tee altool.log
-          code=${PIPESTATUS[0]}
-          set -e
+          # 17. App Store Connect returns 5xx often enough to matter — a run
+          # died on six consecutive 500s from list-apps with a perfectly good
+          # binary. That is Apple being down, not a defect, so retry it rather
+          # than making a person re-dispatch.
+          attempt=1
+          while [ $attempt -le 4 ]; do
+            set +e
+            xcrun altool --upload-app -f "$RUNNER_TEMP/export/Cadence.ipa" -t ios \
+              --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1 | tee altool.log
+            code=${PIPESTATUS[0]}
+            set -e
+
+            if grep -qE "received status code 5[0-9][0-9]|\(500\)|\(503\)" altool.log; then
+              echo "Apple returned a server error (attempt $attempt) — backing off"
+              attempt=$((attempt + 1))
+              sleep $((attempt * 45))
+              continue
+            fi
+            break
+          done
 
           # 11. altool exits 0 even when the upload was rejected.
           if grep -q "ERROR" altool.log; then
