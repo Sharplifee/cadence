@@ -184,7 +184,7 @@ struct LiveView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: controller.mediaPlaying ? "speaker.wave.2.fill" : "speaker.slash")
-                        .foregroundStyle(controller.mediaPlaying ? Ink.matched : .tertiary)
+                        .foregroundStyle(controller.mediaPlaying ? Ink.matched : Color.secondary.opacity(0.55))
                     Text(controller.mediaPlaying ? "Media playing — captured through the mic"
                                                  : "No other audio playing")
                         .font(.caption)
