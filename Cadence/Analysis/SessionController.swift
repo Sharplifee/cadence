@@ -25,6 +25,7 @@ public final class SessionController: ObservableObject {
     @Published public var settings = CueSettings()
     @Published public private(set) var watchReady = false
     @Published public private(set) var isEnrolled = false
+    @Published public private(set) var micLive = true
 
     public var metronomeEnabled: Bool {
         get { settings.metronomeEnabled }
@@ -57,6 +58,7 @@ public final class SessionController: ObservableObject {
     private var lastTick: TimeInterval = 0
     private var sessionDir: URL?
     private var lastRecognizerRestart: TimeInterval = 0
+    private var captureToDisk = false
     private var scoredCueCount = 0
     private var lastScoredCorrection = -1
 
@@ -68,7 +70,26 @@ public final class SessionController: ObservableObject {
             guard let self else { return }
             self.dspQueue.async {
                 let r = self.analyzer.analyze(samples, vad: self.vad)
-                Task { @MainActor in self.apply(r, samples: samples) }
+                // Disk writes and the speech buffer stay off the main actor.
+                // At two frames a second these are not free, and they were
+                // landing in the middle of the UI's animation window.
+                if self.captureToDisk {
+                    self.recorder.append(samples)
+                }
+                Task { @MainActor in
+                    if self.transcribing { self.transcriber.append(samples, sampleRate: AudioCapture.sampleRate) }
+                    self.apply(r)
+                }
+            }
+        }
+
+        // F: an interruption used to leave the UI claiming to listen with a
+        // dead engine. Surface it, and reflect the recovery.
+        capture.onAvailabilityChange = { [weak self] available, message in
+            Task { @MainActor in
+                guard let self else { return }
+                self.micLive = available
+                self.warning = available ? nil : message
             }
         }
         policy.applySensitivity(0.5)
@@ -170,7 +191,10 @@ public final class SessionController: ObservableObject {
         escalation.reset()
 
         sessionDir = store.directory(for: sessionID)
-        if let dir = sessionDir { recorder.start(sessionID: sessionID, in: dir) }
+        if let dir = sessionDir {
+            recorder.start(sessionID: sessionID, in: dir)
+            captureToDisk = true
+        }
 
         if transcriber.isAvailable {
             transcriber.start()
@@ -206,6 +230,7 @@ public final class SessionController: ObservableObject {
         transcriber.stop(); transcribing = false
         assembler.finish(text: liveText, at: elapsed)
         utterances = assembler.utterances
+        captureToDisk = false
         let hasAudio = recorder.finish()
         watch.send(.sessionEnd, strain: 0, channels: .silent, tier: 1)
         isRunning = false
@@ -230,7 +255,7 @@ public final class SessionController: ObservableObject {
     // MARK: - Frame pipeline
 
     /// Runs on the main actor with the DSP already done.
-    private func apply(_ r: FrameAnalyzer.Result, samples: [Float]) {
+    private func apply(_ r: FrameAnalyzer.Result) {
         if isEnrolling {
             if r.isSpeech {
                 classifier.enroll(dbfs: r.dbfs, centroid: r.centroid, f0: r.f0)
@@ -249,8 +274,6 @@ public final class SessionController: ObservableObject {
             : .silence
         currentSpeaker = speaker
 
-        recorder.append(samples)
-        transcriber.append(samples, sampleRate: AudioCapture.sampleRate)
         assembler.observe(speaker: speaker, dbfs: r.dbfs, at: t)
 
         // SFSpeechRecognizer stops silently after roughly a minute per task.

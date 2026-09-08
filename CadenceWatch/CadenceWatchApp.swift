@@ -54,10 +54,13 @@ struct WatchLiveView: View {
                     Text("\(Int(receiver.talkShare * 100))")
                         .font(.system(size: 30, weight: .medium, design: .rounded))
                     Text("% yours").font(.system(size: 10)).foregroundStyle(.secondary)
+                } else if receiver.pending {
+                    ProgressView().controlSize(.small)
+                    Text("starting").font(.caption2).foregroundStyle(.secondary)
                 } else {
                     Image(systemName: "waveform.slash")
                         .font(.system(size: 22)).foregroundStyle(.secondary)
-                    Text("off").font(.caption2).foregroundStyle(.secondary)
+                    Text("tap to start").font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 if receiver.lastCue != .none && receiver.active {
                     Text(receiver.lastCue.label)

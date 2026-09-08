@@ -13,6 +13,7 @@ public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate 
     @Published public var strain: Double = 0
     @Published public var tier: Int = 1
     @Published public var talkShare: Double = 0.5
+    @Published public var pending = false
 
     public let cuePlayer = WatchCuePlayer()
     public let runtime = WorkoutRuntime()
@@ -39,11 +40,13 @@ public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate 
         switch cue {
         case .sessionStart:
             active = true
+            pending = false
             // The phone launched us via startWatchApp, which already began a
             // workout session; start() is a no-op if one is running.
             runtime.start()
         case .sessionEnd:
             active = false
+            pending = false
             runtime.stop()
         case .none:
             return                                  // strain-only ping
@@ -57,12 +60,21 @@ public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate 
     /// conversation you are already in defeats the point of the wrist.
     public func toggleSession() {
         guard WCSession.default.isReachable else { return }
-        WCSession.default.sendMessageData(Data([active ? CueCode.sessionEnd.rawValue
-                                                       : CueCode.sessionStart.rawValue,
-                                                0, 0, 1]),
-                                          replyHandler: nil, errorHandler: nil)
-        active.toggle()
-        if active { runtime.start() } else { runtime.stop() }
+        // Ask, do not assume. The phone owns session state and confirms it by
+        // sending sessionStart or sessionEnd back; toggling optimistically here
+        // let the two devices disagree whenever the phone did not act.
+        let request = active ? CueCode.sessionEnd : CueCode.sessionStart
+        pending = true
+        WCSession.default.sendMessageData(Data([request.rawValue, 0, 0, 1]),
+                                          replyHandler: nil,
+                                          errorHandler: { [weak self] _ in
+            Task { @MainActor in self?.pending = false }
+        })
+        // If the phone never answers, stop showing a spinner forever.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            self.pending = false
+        }
     }
 
     nonisolated public func session(_ s: WCSession,

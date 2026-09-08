@@ -38,14 +38,19 @@ public final class SessionStore {
             .appendingPathComponent("summary.json"))
     }
 
+    /// An hour of conversation is ~7,200 frames. Encoding that to JSON on the
+    /// main actor at the moment the user taps "End conversation" is a visible
+    /// hang at exactly the wrong time.
     public func persist(summary: SessionSummary, frames: [Frame]) {
-        let enc = JSONEncoder()
-        enc.dateEncodingStrategy = .iso8601
         let dir = root.appendingPathComponent(summary.id.uuidString, isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        try? enc.encode(summary).write(to: dir.appendingPathComponent("summary.json"))
-        try? enc.encode(frames).write(to: dir.appendingPathComponent("frames.json"))
-        Task { await SyncClient.shared.upload(summary: summary, frames: frames) }
+        DispatchQueue.global(qos: .utility).async {
+            let enc = JSONEncoder()
+            enc.dateEncodingStrategy = .iso8601
+            try? enc.encode(summary).write(to: dir.appendingPathComponent("summary.json"))
+            try? enc.encode(frames).write(to: dir.appendingPathComponent("frames.json"))
+            Task { await SyncClient.shared.upload(summary: summary, frames: frames) }
+        }
     }
 
     public func allSummaries() -> [SessionSummary] {

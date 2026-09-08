@@ -45,7 +45,8 @@ struct LiveView: View {
 
     private var header: some View {
         VStack(spacing: 4) {
-            Text(controller.isRunning ? controller.divergence.headline : "Ready")
+            Text(!controller.micLive && controller.isRunning ? "Paused"
+                 : (controller.isRunning ? controller.divergence.headline : "Ready"))
                 .font(.title2.weight(.semibold))
             Text(controller.isRunning
                  ? timeString(controller.elapsed)
@@ -76,9 +77,9 @@ struct LiveView: View {
                 HStack {
                     Text("Hearing").font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Text(speakerLabel)
+                    Text(controller.micLive ? speakerLabel : "mic paused")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(speakerColor)
+                        .foregroundStyle(controller.micLive ? speakerColor : Ink.runaway)
                 }
                 LevelMeter(dbfs: controller.level, color: speakerColor)
                 if controller.divergence.confidence < 0.5 {
