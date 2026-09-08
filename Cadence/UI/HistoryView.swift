@@ -114,16 +114,16 @@ struct SessionDetailView: View {
                     statsCard
                     if summary.hasAudio { playbackCard }
                     Picker("", selection: $tab) {
-                        Text("What to work on").tag(0)
+                        Text(summary.isAmbient ? "Marks" : "What to work on").tag(0)
                         Text("Transcript").tag(1)
-                        Text("Cues").tag(2)
+                        Text(summary.isAmbient ? "Timeline" : "Cues").tag(2)
                     }
                     .pickerStyle(.segmented)
 
                     switch tab {
-                    case 0: findingsSection
+                    case 0: summary.isAmbient ? AnyView(marksSection) : AnyView(findingsSection)
                     case 1: transcriptSection
-                    default: cuesSection
+                    default: summary.isAmbient ? AnyView(timelineSection) : AnyView(cuesSection)
                     }
                 }
                 .padding(20)
@@ -171,6 +171,75 @@ struct SessionDetailView: View {
                 Spacer()
             }
         }
+    }
+
+    /// Bookmarks first — this is what an ambient recording is for.
+    private var marksSection: some View {
+        VStack(spacing: 12) {
+            if summary.timeline.bookmarks.isEmpty {
+                Card { Text("Nothing marked in this recording.")
+                        .font(.subheadline).foregroundStyle(.secondary) }
+            }
+            ForEach(summary.timeline.bookmarks) { m in
+                Card {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Image(systemName: "bookmark.fill").foregroundStyle(Ink.them)
+                            Text(m.label).font(.subheadline.weight(.medium))
+                            Spacer()
+                            Button(timeString(m.t)) { seek(to: m.t) }
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(Ink.matched)
+                        }
+                        let ctx = summary.timeline.context(around: m)
+                        if !ctx.isEmpty {
+                            Text("Around it: " + ctx.map(\.label).joined(separator: ", "))
+                                .font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+            gapNotice
+        }
+    }
+
+    private var timelineSection: some View {
+        VStack(spacing: 8) {
+            ForEach(summary.timeline.markers) { m in
+                HStack {
+                    Text(m.label).font(.caption)
+                    Spacer()
+                    Button(timeString(m.t)) { seek(to: m.t) }
+                        .font(.caption2.monospacedDigit()).foregroundStyle(Ink.matched)
+                }
+                .padding(.horizontal, 4)
+            }
+            gapNotice
+        }
+    }
+
+    /// Never let a hole in the recording look like silence.
+    @ViewBuilder private var gapNotice: some View {
+        let gaps = summary.timeline.audioGaps(upTo: summary.duration)
+        if !gaps.isEmpty {
+            Card {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Missing audio").font(.subheadline.weight(.medium))
+                        .foregroundStyle(Ink.drifting)
+                    Text("\(Int(summary.timeline.gapSeconds(upTo: summary.duration) / 60)) min across \(gaps.count) period(s). Sound routed to headphones never reaches the microphone, so it is not in this recording.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func seek(to t: TimeInterval) {
+        if player == nil, let url = store.audioURL(for: summary.id) {
+            player = try? AVAudioPlayer(contentsOf: url)
+        }
+        player?.currentTime = t
+        player?.play()
+        playing = true
     }
 
     private var findingsSection: some View {

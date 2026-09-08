@@ -10,6 +10,8 @@ public final class WatchBridge: NSObject, WCSessionDelegate {
 
     /// Called when the watch asks the phone to start or stop.
     public var onRemoteToggle: ((Bool) -> Void)?
+    /// The wrist asked to bookmark this moment.
+    public var onRemoteMark: (() -> Void)?
 
     public override init() {
         super.init()
@@ -48,6 +50,7 @@ public final class WatchBridge: NSObject, WCSessionDelegate {
         switch cue {
         case .sessionStart: DispatchQueue.main.async { self.onRemoteToggle?(true) }
         case .sessionEnd:   DispatchQueue.main.async { self.onRemoteToggle?(false) }
+        case .markMoment:   DispatchQueue.main.async { self.onRemoteMark?() }
         default: break
         }
     }

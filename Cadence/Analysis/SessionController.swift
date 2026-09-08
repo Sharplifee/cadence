@@ -26,6 +26,10 @@ public final class SessionController: ObservableObject {
     @Published public private(set) var watchReady = false
     @Published public private(set) var isEnrolled = false
     @Published public private(set) var micLive = true
+    @Published public private(set) var isAmbient = false
+    @Published public private(set) var timeline = AmbientTimeline()
+    @Published public private(set) var headphonesOn = false
+    @Published public private(set) var mediaPlaying = false
 
     public var metronomeEnabled: Bool {
         get { settings.metronomeEnabled }
@@ -90,6 +94,31 @@ public final class SessionController: ObservableObject {
                 guard let self else { return }
                 self.micLive = available
                 self.warning = available ? nil : message
+                guard self.isRunning else { return }
+                self.mark(available ? .captureResumed : .captureLost)
+            }
+        }
+
+        // Media out loud IS in the recording — the mic hears it. This marker
+        // exists so you can see what was playing when an idea landed.
+        capture.onOtherAudioChange = { [weak self] playing in
+            Task { @MainActor in
+                guard let self else { return }
+                self.mediaPlaying = playing
+                guard self.isRunning else { return }
+                self.mark(playing ? .mediaStarted : .mediaStopped)
+            }
+        }
+
+        // Headphones are different: that audio never reaches the mic, so the
+        // recording genuinely has a hole in it and must say so.
+        capture.onHeadphonesChange = { [weak self] connected in
+            Task { @MainActor in
+                guard let self else { return }
+                guard connected != self.headphonesOn else { return }
+                self.headphonesOn = connected
+                guard self.isRunning else { return }
+                self.mark(connected ? .headphonesConnected : .headphonesDisconnected)
             }
         }
         policy.applySensitivity(0.5)
@@ -108,6 +137,10 @@ public final class SessionController: ObservableObject {
             else if !start, self.isRunning { self.stop() }
         }
 
+        watch.onRemoteMark = { [weak self] in
+            Task { @MainActor in self?.markMoment() }
+        }
+
         transcriber.onPartial = { [weak self] text in
             self?.ingestRecognizedText(text)
         }
@@ -120,6 +153,25 @@ public final class SessionController: ObservableObject {
     }
 
     // MARK: - Control
+
+    private func mark(_ kind: Marker.Kind, note: String? = nil) {
+        timeline.add(Marker(t: elapsed, kind: kind, note: note))
+    }
+
+    /// The button. Drops a bookmark you can jump back to, from either device.
+    public func markMoment(note: String? = nil) {
+        guard isRunning else { return }
+        mark(.bookmark, note: note)
+        cuePlayer.play(.sessionStart, channels: [.haptic], tier: 1)
+        watch.send(.sessionStart, strain: divergence.strain, channels: [.haptic], tier: 1)
+    }
+
+    /// Ambient capture: record and transcribe continuously, coach nothing.
+    /// No cues fire, so it can run all day without buzzing at you.
+    public func startAmbient() throws {
+        isAmbient = true
+        try start()
+    }
 
     public func applySensitivity(_ value: Double) {
         policy.applySensitivity(Float(value))
@@ -185,6 +237,10 @@ public final class SessionController: ObservableObject {
         frameIndex = 0; frames.removeAll(); elapsed = 0
         lastCue = .none; divergence = .matched
         assembler.reset(); utterances.removeAll(); liveText = ""
+        timeline = AmbientTimeline()
+        timeline.add(Marker(t: 0, kind: .sessionStart))
+        headphonesOn = capture.headphonesConnected
+        if headphonesOn { timeline.add(Marker(t: 0, kind: .headphonesConnected)) }
         scoredCueCount = 0; lastScoredCorrection = -1
         lastRecognizerRestart = 0
         warning = nil
@@ -232,6 +288,7 @@ public final class SessionController: ObservableObject {
         utterances = assembler.utterances
         captureToDisk = false
         let hasAudio = recorder.finish()
+        mark(.sessionEnd)
         watch.send(.sessionEnd, strain: 0, channels: .silent, tier: 1)
         isRunning = false
 
@@ -246,9 +303,12 @@ public final class SessionController: ObservableObject {
             title: sessionTitle.isEmpty ? nil : sessionTitle,
             utterances: utterances,
             insights: Insights.derive(from: utterances, turns: turns.turns),
-            hasAudio: hasAudio
+            hasAudio: hasAudio,
+            timeline: timeline,
+            isAmbient: isAmbient
         )
         sessionTitle = ""
+        isAmbient = false
         store.persist(summary: summary, frames: frames)
     }
 
@@ -298,7 +358,10 @@ public final class SessionController: ObservableObject {
         divergence = d
         policy.scoreCorrection(at: t, current: d)
 
-        if let cue = policy.evaluate(d, at: t) {
+        // Ambient mode is a journal, not a coach. Silence every cue.
+        if isAmbient {
+            watch.sendStrain(d.strain)
+        } else if let cue = policy.evaluate(d, at: t) {
             lastCue = cue
             let step = escalation.register(at: t)
             deliver(cue, channels: step.channels, tier: step.tier)

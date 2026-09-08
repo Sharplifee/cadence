@@ -97,22 +97,30 @@ public struct SessionSummary: Codable, Sendable {
     public var insights: Insights?
     /// Whether the audio file is still on disk next to this summary.
     public var hasAudio: Bool
+    /// Markers and known audio gaps for this recording.
+    public var timeline: AmbientTimeline
+    /// Ambient capture is a journal, not a coached conversation: no cues fire.
+    public var isAmbient: Bool
 
     public init(id: UUID, startedAt: Date, duration: TimeInterval,
                 talkShare: Float, interruptions: Int, cues: [CueEvent],
                 correctionRate: Float?, title: String? = nil,
                 utterances: [Utterance] = [], insights: Insights? = nil,
-                hasAudio: Bool = false) {
+                hasAudio: Bool = false,
+                timeline: AmbientTimeline = AmbientTimeline(),
+                isAmbient: Bool = false) {
         self.id = id; self.startedAt = startedAt; self.duration = duration
         self.talkShare = talkShare; self.interruptions = interruptions
         self.cues = cues; self.correctionRate = correctionRate
         self.title = title; self.utterances = utterances
         self.insights = insights; self.hasAudio = hasAudio
+        self.timeline = timeline; self.isAmbient = isAmbient
     }
 
     public var displayTitle: String {
         if let t = title, !t.isEmpty { return t }
-        return startedAt.formatted(.dateTime.weekday(.wide).hour().minute())
+        let stamp = startedAt.formatted(.dateTime.weekday(.wide).hour().minute())
+        return isAmbient ? "Ambient · \(stamp)" : stamp
     }
 }
 

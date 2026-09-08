@@ -62,6 +62,10 @@ struct WatchLiveView: View {
                         .font(.system(size: 22)).foregroundStyle(.secondary)
                     Text("tap to start").font(.system(size: 10)).foregroundStyle(.secondary)
                 }
+                if receiver.active && receiver.markCount > 0 {
+                    Text("\(receiver.markCount) marked")
+                        .font(.system(size: 9)).foregroundStyle(.tertiary)
+                }
                 if receiver.lastCue != .none && receiver.active {
                     Text(receiver.lastCue.label)
                         .font(.system(size: 10, weight: .medium))
@@ -70,8 +74,12 @@ struct WatchLiveView: View {
             }
         }
         .padding(6)
-        // Tapping the ring starts or stops the whole thing, phone included.
-        .onTapGesture { receiver.toggleSession() }
+        // Tap marks the moment while running; long press starts or ends it.
+        // Marking is the frequent action, so it gets the easy gesture.
+        .onTapGesture {
+            if receiver.active { receiver.markMoment() } else { receiver.toggleSession() }
+        }
+        .onLongPressGesture(minimumDuration: 0.6) { receiver.toggleSession() }
     }
 
     private var strainColor: Color {

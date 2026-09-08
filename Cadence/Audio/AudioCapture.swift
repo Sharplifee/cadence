@@ -22,9 +22,23 @@ public final class AudioCapture {
     public var onFrame: (([Float]) -> Void)?
     /// Capture stopped for a reason outside our control, and whether it came back.
     public var onAvailabilityChange: ((Bool, String?) -> Void)?
+    /// Other audio started or stopped playing out loud. Speaker playback IS in
+    /// the recording; this exists so the timeline can say what it was.
+    public var onOtherAudioChange: ((Bool) -> Void)?
+    /// Headphones came or went. Everything routed to them is inaudible to the
+    /// microphone, so this is what marks a genuine hole in the recording.
+    public var onHeadphonesChange: ((Bool) -> Void)?
+
+    public var headphonesConnected: Bool {
+        let outs = session.currentRoute.outputs.map(\.portType)
+        return outs.contains { [.headphones, .bluetoothA2DP, .bluetoothLE,
+                                .bluetoothHFP, .airPlay].contains($0) }
+    }
+    public var otherAudioPlaying: Bool { session.isOtherAudioPlaying }
 
     public private(set) var isCapturing = false
     private var wantsCapture = false
+    private var lastOtherAudio = false
 
     public init() {
         let nc = NotificationCenter.default
@@ -85,6 +99,9 @@ public final class AudioCapture {
         try engine.start()
         isCapturing = true
         onAvailabilityChange?(true, nil)
+        onHeadphonesChange?(headphonesConnected)
+        lastOtherAudio = session.isOtherAudioPlaying
+        onOtherAudioChange?(lastOtherAudio)
     }
 
     public func stop() {
@@ -133,6 +150,7 @@ public final class AudioCapture {
         switch reason {
         case .newDeviceAvailable, .oldDeviceUnavailable, .override,
              .categoryChange, .routeConfigurationChange:
+            onHeadphonesChange?(headphonesConnected)
             resume()
         default:
             break
@@ -175,6 +193,13 @@ public final class AudioCapture {
             return buffer
         }
         guard error == nil, let ptr = out.floatChannelData?[0] else { return }
+
+        // Cheap to poll here and there is no notification for it.
+        let playing = session.isOtherAudioPlaying
+        if playing != lastOtherAudio {
+            lastOtherAudio = playing
+            DispatchQueue.main.async { [weak self] in self?.onOtherAudioChange?(playing) }
+        }
 
         pending.append(contentsOf: UnsafeBufferPointer(start: ptr, count: Int(out.frameLength)))
         while pending.count - readIndex >= frameLength {

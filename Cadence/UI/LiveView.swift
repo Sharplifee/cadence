@@ -20,12 +20,13 @@ struct LiveView: View {
                                   running: controller.isRunning)
                         if controller.isRunning {
                             listeningProof
-                            balances
+                            captureContext
+                            if !controller.isAmbient { balances }
                             if controller.transcribing { transcriptPeek }
                         } else {
                             titleField
                         }
-                        cueStrip
+                        if !controller.isAmbient { cueStrip }
                         controls
                         if let w = controller.warning { note(w, Ink.drifting) }
                         if let error { note(error, Ink.runaway) }
@@ -162,8 +163,48 @@ struct LiveView: View {
         }
     }
 
+    /// The whole point of ambient mode: one big target you can hit without
+    /// looking, while the thought is still in your head.
+    private var markButton: some View {
+        Button { controller.markMoment() } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "bookmark.fill")
+                Text("Mark this moment").font(.headline)
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 18)
+        }
+        .background(Ink.them.opacity(0.9), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .foregroundStyle(Ink.bg)
+    }
+
+    /// What is actually going into the recording right now. Headphones are
+    /// called out because that audio never reaches the microphone.
+    private var captureContext: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: controller.mediaPlaying ? "speaker.wave.2.fill" : "speaker.slash")
+                        .foregroundStyle(controller.mediaPlaying ? Ink.matched : .tertiary)
+                    Text(controller.mediaPlaying ? "Media playing — captured through the mic"
+                                                 : "No other audio playing")
+                        .font(.caption)
+                }
+                if controller.headphonesOn {
+                    HStack(spacing: 8) {
+                        Image(systemName: "airpods").foregroundStyle(Ink.drifting)
+                        Text("Headphones connected — that audio is not in the recording")
+                            .font(.caption).foregroundStyle(Ink.drifting)
+                    }
+                }
+                Text("\(controller.timeline.bookmarks.count) marked")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
     private var controls: some View {
         VStack(spacing: 14) {
+            if controller.isRunning { markButton }
             Button {
                 do {
                     if controller.isRunning { controller.stop() } else { try controller.start() }
@@ -176,6 +217,22 @@ struct LiveView: View {
             .background(controller.isRunning ? Ink.runaway.opacity(0.9) : Ink.matched,
                         in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .foregroundStyle(Ink.bg)
+
+            if !controller.isRunning {
+                Button {
+                    do { try controller.startAmbient(); error = nil }
+                    catch { self.error = error.localizedDescription }
+                } label: {
+                    VStack(spacing: 3) {
+                        Text("Start ambient capture").font(.subheadline.weight(.medium))
+                        Text("Records and transcribes all day. No cues, no buzzing.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 14)
+                }
+                .background(Ink.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .foregroundStyle(.primary)
+            }
 
             Toggle("Metronome mode", isOn: Binding(
                 get: { controller.metronomeEnabled },

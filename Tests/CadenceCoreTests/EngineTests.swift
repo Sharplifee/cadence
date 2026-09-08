@@ -537,3 +537,64 @@ final class FrameAnalyzerTests: XCTestCase {
         XCTAssertEqual(a.analyze(x, vad: vad1).f0, a.analyze(x, vad: vad2).f0)
     }
 }
+
+final class AmbientTimelineTests: XCTestCase {
+    func testHeadphonePeriodIsRecordedAsAnAudioGap() {
+        var t = AmbientTimeline()
+        t.add(Marker(t: 10, kind: .headphonesConnected))
+        t.add(Marker(t: 70, kind: .headphonesDisconnected))
+        let gaps = t.audioGaps(upTo: 300)
+        XCTAssertEqual(gaps.count, 1)
+        XCTAssertEqual(gaps[0].start, 10)
+        XCTAssertEqual(gaps[0].end, 70)
+        XCTAssertEqual(t.gapSeconds(upTo: 300), 60)
+    }
+
+    func testGapLeftOpenRunsToTheEnd() {
+        var t = AmbientTimeline()
+        t.add(Marker(t: 100, kind: .headphonesConnected))
+        XCTAssertEqual(t.gapSeconds(upTo: 250), 150,
+                       "headphones still in at the end means the tail is missing too")
+    }
+
+    func testInterruptionAlsoCountsAsAGap() {
+        var t = AmbientTimeline()
+        t.add(Marker(t: 5, kind: .captureLost))
+        t.add(Marker(t: 25, kind: .captureResumed))
+        XCTAssertEqual(t.gapSeconds(upTo: 100), 20)
+    }
+
+    func testSpeakerPlaybackIsNotAGap() {
+        // Media out loud IS captured by the mic — it must never be reported
+        // as missing audio.
+        var t = AmbientTimeline()
+        t.add(Marker(t: 10, kind: .mediaStarted))
+        t.add(Marker(t: 90, kind: .mediaStopped))
+        XCTAssertTrue(t.audioGaps(upTo: 200).isEmpty)
+    }
+
+    func testMarkersStayOrderedRegardlessOfInsertion() {
+        var t = AmbientTimeline()
+        t.add(Marker(t: 50, kind: .bookmark))
+        t.add(Marker(t: 10, kind: .mediaStarted))
+        t.add(Marker(t: 30, kind: .bookmark))
+        XCTAssertEqual(t.markers.map(\.t), [10, 30, 50])
+        XCTAssertEqual(t.bookmarks.count, 2)
+    }
+
+    func testContextAroundABookmarkFindsWhatWasPlaying() {
+        var t = AmbientTimeline()
+        let mark = Marker(t: 300, kind: .bookmark, note: "idea about routing")
+        t.add(Marker(t: 240, kind: .mediaStarted))
+        t.add(mark)
+        t.add(Marker(t: 900, kind: .mediaStopped))
+        let ctx = t.context(around: mark)
+        XCTAssertEqual(ctx.count, 1)
+        XCTAssertEqual(ctx[0].kind, .mediaStarted)
+    }
+
+    func testBookmarkLabelUsesTheNote() {
+        XCTAssertEqual(Marker(t: 1, kind: .bookmark, note: "call Dylan").label, "call Dylan")
+        XCTAssertEqual(Marker(t: 1, kind: .bookmark).label, "Marked")
+    }
+}

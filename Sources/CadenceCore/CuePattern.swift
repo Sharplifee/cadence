@@ -51,6 +51,8 @@ public struct CuePattern: Codable, Sendable, Equatable {
                                                      .init(on: 0.25, gap: 0)])
         case .sessionEnd:      return .init(pulses: [.init(on: 0.25, gap: 0.10),
                                                      .init(on: 0.10, gap: 0)])
+        case .markMoment:      return .init(pulses: [.init(on: 0.05, gap: 0.08),
+                                                        .init(on: 0.05, gap: 0)])
         case .none:            return .init(pulses: [])
         }
     }

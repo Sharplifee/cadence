@@ -14,6 +14,7 @@ public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate 
     @Published public var tier: Int = 1
     @Published public var talkShare: Double = 0.5
     @Published public var pending = false
+    @Published public var markCount = 0
 
     public let cuePlayer = WatchCuePlayer()
     public let runtime = WorkoutRuntime()
@@ -75,6 +76,15 @@ public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate 
             try? await Task.sleep(nanoseconds: 6_000_000_000)
             self.pending = false
         }
+    }
+
+    /// Mark this moment on the phone's recording, from the wrist.
+    public func markMoment() {
+        guard WCSession.default.isReachable, active else { return }
+        WCSession.default.sendMessageData(Data([CueCode.markMoment.rawValue, 0, 0, 1]),
+                                          replyHandler: nil, errorHandler: nil)
+        cuePlayer.play(.markMoment, channels: [.haptic], tier: 1)
+        markCount += 1
     }
 
     nonisolated public func session(_ s: WCSession,

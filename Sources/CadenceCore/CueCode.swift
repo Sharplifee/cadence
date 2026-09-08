@@ -16,6 +16,8 @@ public enum CueCode: UInt8, Codable, CaseIterable, Sendable {
     /// Session lifecycle.
     case sessionStart    = 6
     case sessionEnd      = 7
+    /// Sent from the wrist: drop a bookmark on the recording.
+    case markMoment      = 8
 
     public var label: String {
         switch self {
@@ -27,6 +29,7 @@ public enum CueCode: UInt8, Codable, CaseIterable, Sendable {
         case .metronomeTick:   return "tick"
         case .sessionStart:    return "session start"
         case .sessionEnd:      return "session end"
+        case .markMoment:      return "marked"
         }
     }
 }
