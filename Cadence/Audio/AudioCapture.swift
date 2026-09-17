@@ -1,4 +1,5 @@
 import AVFoundation
+import CadenceCore
 import Foundation
 
 /// Continuous mic capture that does not interrupt whatever else is playing, and

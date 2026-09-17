@@ -84,7 +84,7 @@ struct LiveView: View {
                         .foregroundStyle(controller.micLive ? speakerColor : Ink.runaway)
                 }
                 LevelMeter(dbfs: controller.level, color: speakerColor)
-                if !controller.mediaCaptured {
+                if controller.headphonesOn {
                     Text("Audio is playing through headphones, so it is not reaching the mic and will not be in this recording.")
                         .font(.caption2).foregroundStyle(Ink.drifting)
                 }
@@ -262,7 +262,7 @@ struct LiveView: View {
             }
 
             if controller.isRunning {
-                Button { controller.mark() } label: {
+                Button { controller.markMoment() } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "bookmark.fill")
                         Text("Mark this moment").font(.headline)
