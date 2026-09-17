@@ -1,89 +1,120 @@
 import Foundation
 
-/// Something worth being able to jump back to.
-public struct Marker: Codable, Sendable, Identifiable, Equatable {
+/// A thing that happened to the audio environment, not to the conversation.
+///
+/// The mic records sound in the room, not the phone's audio stream, so anything
+/// played through headphones is inaudible to it. Rather than pretend otherwise,
+/// the timeline records *when* other audio was playing and what the route was,
+/// so a silent stretch in the recording is explained rather than mysterious.
+public struct ContextEvent: Codable, Sendable, Identifiable {
     public enum Kind: String, Codable, Sendable {
-        /// You pressed the button. The whole point.
-        case bookmark
-        /// Other audio started or stopped playing out loud.
-        case mediaStarted, mediaStopped
-        /// Route changed — headphones in or out. Matters because audio through
-        /// headphones is not in the recording at all, and future-you needs to
-        /// know the gap is a limitation rather than silence.
-        case headphonesConnected, headphonesDisconnected
-        /// Capture was lost and recovered.
-        case captureLost, captureResumed
-        case sessionStart, sessionEnd
+        case mediaStarted        // something else began playing
+        case mediaStopped
+        case routeToSpeaker      // audible to the mic — it gets recorded
+        case routeToHeadphones   // NOT audible to the mic — recording goes quiet
+        case routeToBluetooth
+        case micPaused           // call, Siri, alarm
+        case micResumed
+        case marked              // Connor pressed the button
     }
 
     public var id: UUID
     public var t: TimeInterval
     public var kind: Kind
-    public var note: String?
+    public var detail: String?
 
-    public init(id: UUID = UUID(), t: TimeInterval, kind: Kind, note: String? = nil) {
-        self.id = id; self.t = t; self.kind = kind; self.note = note
+    public init(id: UUID = UUID(), t: TimeInterval, kind: Kind, detail: String? = nil) {
+        self.id = id; self.t = t; self.kind = kind; self.detail = detail
+    }
+
+    /// True when the mic could not hear whatever was playing.
+    public var meansAudioWasNotCaptured: Bool {
+        kind == .routeToHeadphones || kind == .routeToBluetooth || kind == .micPaused
     }
 
     public var label: String {
         switch kind {
-        case .bookmark:               return note?.isEmpty == false ? note! : "Marked"
-        case .mediaStarted:           return "Media started playing"
-        case .mediaStopped:           return "Media stopped"
-        case .headphonesConnected:    return "Headphones connected"
-        case .headphonesDisconnected: return "Headphones disconnected"
-        case .captureLost:            return "Capture interrupted"
-        case .captureResumed:         return "Capture resumed"
-        case .sessionStart:           return "Started"
-        case .sessionEnd:             return "Ended"
+        case .mediaStarted:      return detail ?? "Media started"
+        case .mediaStopped:      return "Media stopped"
+        case .routeToSpeaker:    return "Speaker — audio being captured"
+        case .routeToHeadphones: return "Headphones — playback not captured"
+        case .routeToBluetooth:  return detail.map { "\($0) — playback not captured" }
+                                        ?? "Bluetooth — playback not captured"
+        case .micPaused:         return "Mic interrupted"
+        case .micResumed:        return "Mic resumed"
+        case .marked:            return detail ?? "Marked"
         }
     }
-
-    /// True where audio was reaching your ears but not the microphone.
-    public var opensAudioGap: Bool { kind == .headphonesConnected || kind == .captureLost }
-    public var closesAudioGap: Bool { kind == .headphonesDisconnected || kind == .captureResumed }
 }
 
-/// The ambient record: markers plus the spans where the recording is knowingly
-/// incomplete.
-///
-/// The gap tracking exists because of a hard platform limit. iOS gives no app
-/// access to another app's audio output, so anything played through headphones
-/// is inaudible to the microphone. Silently producing a recording with holes in
-/// it would be worse than useless — you would replay a moment, hear nothing, and
-/// conclude nothing was happening.
+/// A bookmark Connor dropped, plus the window around it worth replaying.
+public struct Moment: Codable, Sendable, Identifiable {
+    public var id: UUID
+    public var t: TimeInterval
+    public var note: String?
+    /// How far back to start playback. An idea arrives after the thing that
+    /// caused it, so the useful window is behind the press, not around it.
+    public var lookbackSeconds: TimeInterval
+
+    public init(id: UUID = UUID(), t: TimeInterval, note: String? = nil,
+                lookbackSeconds: TimeInterval = 120) {
+        self.id = id; self.t = t; self.note = note
+        self.lookbackSeconds = lookbackSeconds
+    }
+
+    public var playbackStart: TimeInterval { max(0, t - lookbackSeconds) }
+}
+
+/// Answers "what was I hearing at 14:32" from the event log.
 public struct AmbientTimeline: Codable, Sendable {
-    public var markers: [Marker] = []
+    public var events: [ContextEvent]
+    public var moments: [Moment]
 
-    public init(markers: [Marker] = []) { self.markers = markers }
-
-    public mutating func add(_ m: Marker) {
-        markers.append(m)
-        markers.sort { $0.t < $1.t }
+    public init(events: [ContextEvent] = [], moments: [Moment] = []) {
+        self.events = events; self.moments = moments
     }
 
-    public var bookmarks: [Marker] { markers.filter { $0.kind == .bookmark } }
+    /// Whether audio playing at this instant would have reached the mic.
+    public func playbackWasCaptured(at t: TimeInterval) -> Bool {
+        let routes = events
+            .filter { $0.t <= t }
+            .filter { [.routeToSpeaker, .routeToHeadphones, .routeToBluetooth].contains($0.kind) }
+        // No route event yet means the built-in speaker, which the mic hears.
+        return routes.last.map { $0.kind == .routeToSpeaker } ?? true
+    }
 
-    /// Periods where sound was going to headphones, or capture was down, and is
-    /// therefore absent from the audio file.
-    public func audioGaps(upTo end: TimeInterval) -> [(start: TimeInterval, end: TimeInterval)] {
-        var gaps: [(TimeInterval, TimeInterval)] = []
-        var open: TimeInterval?
-        for m in markers {
-            if m.opensAudioGap, open == nil { open = m.t }
-            else if m.closesAudioGap, let s = open { gaps.append((s, m.t)); open = nil }
+    public func mediaWasPlaying(at t: TimeInterval) -> Bool {
+        let media = events.filter { $0.t <= t }
+            .filter { $0.kind == .mediaStarted || $0.kind == .mediaStopped }
+        return media.last?.kind == .mediaStarted
+    }
+
+    /// Plain description of the audio environment at a moment, for the review
+    /// screen. This is the whole point of the log.
+    public func context(at t: TimeInterval) -> String {
+        let playing = mediaWasPlaying(at: t)
+        let captured = playbackWasCaptured(at: t)
+        switch (playing, captured) {
+        case (true, true):  return "Media was playing out loud and is in the recording."
+        case (true, false): return "Media was playing through headphones, so it is not in the recording."
+        case (false, _):    return "No other audio was playing."
         }
-        if let s = open { gaps.append((s, end)) }
-        return gaps
     }
 
-    public func gapSeconds(upTo end: TimeInterval) -> TimeInterval {
-        audioGaps(upTo: end).reduce(0) { $0 + ($1.end - $1.start) }
-    }
-
-    /// Everything within a window either side of a bookmark — the context that
-    /// might have sparked it.
-    public func context(around marker: Marker, window: TimeInterval = 120) -> [Marker] {
-        markers.filter { abs($0.t - marker.t) <= window && $0.id != marker.id }
+    /// Stretches where the recording will be missing whatever was played.
+    public func uncapturedRanges(upTo end: TimeInterval) -> [ClosedRange<TimeInterval>] {
+        var out: [ClosedRange<TimeInterval>] = []
+        var openedAt: TimeInterval?
+        for e in events.sorted(by: { $0.t < $1.t }) {
+            if e.meansAudioWasNotCaptured, openedAt == nil {
+                openedAt = e.t
+            } else if !e.meansAudioWasNotCaptured, let start = openedAt,
+                      [.routeToSpeaker, .micResumed].contains(e.kind) {
+                if e.t > start { out.append(start...e.t) }
+                openedAt = nil
+            }
+        }
+        if let start = openedAt, end > start { out.append(start...end) }
+        return out
     }
 }

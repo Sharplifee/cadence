@@ -97,7 +97,8 @@ public struct SessionSummary: Codable, Sendable {
     public var insights: Insights?
     /// Whether the audio file is still on disk next to this summary.
     public var hasAudio: Bool
-    /// Markers and known audio gaps for this recording.
+    /// What the audio environment was doing, where playback was and was not
+    /// captured, and where Connor marked a moment.
     public var timeline: AmbientTimeline
     /// Ambient capture is a journal, not a coached conversation: no cues fire.
     public var isAmbient: Bool

@@ -47,6 +47,7 @@ struct LiveView: View {
     private var header: some View {
         VStack(spacing: 4) {
             Text(!controller.micLive && controller.isRunning ? "Paused"
+                 : controller.isAmbient ? "Recording"
                  : (controller.isRunning ? controller.divergence.headline : "Ready"))
                 .font(.title2.weight(.semibold))
             Text(controller.isRunning
@@ -83,12 +84,33 @@ struct LiveView: View {
                         .foregroundStyle(controller.micLive ? speakerColor : Ink.runaway)
                 }
                 LevelMeter(dbfs: controller.level, color: speakerColor)
-                if controller.divergence.confidence < 0.5 {
+                // Say plainly whether what is playing is making it into the
+                // recording. Silent dead air with no explanation is worse than
+                // knowing the headphones ate it.
+                if let note = captureNote {
+                    Text(note).font(.caption2).foregroundStyle(Ink.drifting)
+                }
+                if controller.moments.count > 0 {
+                    Text("\(controller.moments.count) marked")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+                if !controller.isAmbient && controller.divergence.confidence < 0.5 {
                     Text("Still learning this conversation — cues stay quiet until both voices have been heard.")
                         .font(.caption2).foregroundStyle(.tertiary)
                 }
             }
         }
+    }
+
+    /// The mic records the room, not the phone's audio bus, so headphone
+    /// playback cannot be captured by any app. Say so rather than leave a gap.
+    private var captureNote: String? {
+        let tl = AmbientTimeline(events: controller.contextEvents, moments: [])
+        let t = controller.elapsed
+        guard tl.mediaWasPlaying(at: t) else { return nil }
+        return tl.playbackWasCaptured(at: t)
+            ? "Media playing out loud — it is going into the recording."
+            : "Media playing through headphones — it cannot be recorded."
     }
 
     private var speakerLabel: String {
@@ -217,6 +239,24 @@ struct LiveView: View {
             .background(controller.isRunning ? Ink.runaway.opacity(0.9) : Ink.matched,
                         in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .foregroundStyle(Ink.bg)
+
+            if controller.isRunning {
+                Button { controller.markMoment() } label: {
+                    Label("Mark this moment", systemImage: "bookmark.fill")
+                        .font(.subheadline.weight(.medium))
+                        .frame(maxWidth: .infinity).padding(.vertical, 14)
+                }
+                .background(Ink.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .foregroundStyle(Ink.drifting)
+            } else {
+                Button { try? controller.startAmbient() } label: {
+                    Label("Just record (no coaching)", systemImage: "dot.radiowaves.left.and.right")
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity).padding(.vertical, 14)
+                }
+                .background(Ink.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .foregroundStyle(.secondary)
+            }
 
             if !controller.isRunning {
                 Button {

@@ -539,62 +539,50 @@ final class FrameAnalyzerTests: XCTestCase {
 }
 
 final class AmbientTimelineTests: XCTestCase {
-    func testHeadphonePeriodIsRecordedAsAnAudioGap() {
-        var t = AmbientTimeline()
-        t.add(Marker(t: 10, kind: .headphonesConnected))
-        t.add(Marker(t: 70, kind: .headphonesDisconnected))
-        let gaps = t.audioGaps(upTo: 300)
-        XCTAssertEqual(gaps.count, 1)
-        XCTAssertEqual(gaps[0].start, 10)
-        XCTAssertEqual(gaps[0].end, 70)
-        XCTAssertEqual(t.gapSeconds(upTo: 300), 60)
+    func testSpeakerPlaybackIsCaptured() {
+        let t = AmbientTimeline(events: [
+            .init(t: 0, kind: .routeToSpeaker),
+            .init(t: 10, kind: .mediaStarted, detail: "Media started")
+        ])
+        XCTAssertTrue(t.playbackWasCaptured(at: 20))
+        XCTAssertTrue(t.mediaWasPlaying(at: 20))
+        XCTAssertTrue(t.context(at: 20).contains("is in the recording"))
     }
 
-    func testGapLeftOpenRunsToTheEnd() {
-        var t = AmbientTimeline()
-        t.add(Marker(t: 100, kind: .headphonesConnected))
-        XCTAssertEqual(t.gapSeconds(upTo: 250), 150,
-                       "headphones still in at the end means the tail is missing too")
+    func testHeadphonePlaybackIsNotCapturedAndSaysSo() {
+        let t = AmbientTimeline(events: [
+            .init(t: 0, kind: .routeToSpeaker),
+            .init(t: 5, kind: .routeToBluetooth, detail: "AirPods"),
+            .init(t: 6, kind: .mediaStarted)
+        ])
+        XCTAssertFalse(t.playbackWasCaptured(at: 10))
+        XCTAssertTrue(t.context(at: 10).contains("not in the recording"))
     }
 
-    func testInterruptionAlsoCountsAsAGap() {
-        var t = AmbientTimeline()
-        t.add(Marker(t: 5, kind: .captureLost))
-        t.add(Marker(t: 25, kind: .captureResumed))
-        XCTAssertEqual(t.gapSeconds(upTo: 100), 20)
+    func testDefaultsToCapturedBeforeAnyRouteEvent() {
+        XCTAssertTrue(AmbientTimeline().playbackWasCaptured(at: 99))
     }
 
-    func testSpeakerPlaybackIsNotAGap() {
-        // Media out loud IS captured by the mic — it must never be reported
-        // as missing audio.
-        var t = AmbientTimeline()
-        t.add(Marker(t: 10, kind: .mediaStarted))
-        t.add(Marker(t: 90, kind: .mediaStopped))
-        XCTAssertTrue(t.audioGaps(upTo: 200).isEmpty)
+    func testUncapturedRangeClosesOnReturnToSpeaker() {
+        let t = AmbientTimeline(events: [
+            .init(t: 10, kind: .routeToHeadphones),
+            .init(t: 40, kind: .routeToSpeaker)
+        ])
+        let r = t.uncapturedRanges(upTo: 100)
+        XCTAssertEqual(r.count, 1)
+        XCTAssertEqual(r[0].lowerBound, 10)
+        XCTAssertEqual(r[0].upperBound, 40)
     }
 
-    func testMarkersStayOrderedRegardlessOfInsertion() {
-        var t = AmbientTimeline()
-        t.add(Marker(t: 50, kind: .bookmark))
-        t.add(Marker(t: 10, kind: .mediaStarted))
-        t.add(Marker(t: 30, kind: .bookmark))
-        XCTAssertEqual(t.markers.map(\.t), [10, 30, 50])
-        XCTAssertEqual(t.bookmarks.count, 2)
+    func testUncapturedRangeRunsToTheEndIfNeverClosed() {
+        let t = AmbientTimeline(events: [.init(t: 10, kind: .routeToHeadphones)])
+        XCTAssertEqual(t.uncapturedRanges(upTo: 300).first?.upperBound, 300)
     }
 
-    func testContextAroundABookmarkFindsWhatWasPlaying() {
-        var t = AmbientTimeline()
-        let mark = Marker(t: 300, kind: .bookmark, note: "idea about routing")
-        t.add(Marker(t: 240, kind: .mediaStarted))
-        t.add(mark)
-        t.add(Marker(t: 900, kind: .mediaStopped))
-        let ctx = t.context(around: mark)
-        XCTAssertEqual(ctx.count, 1)
-        XCTAssertEqual(ctx[0].kind, .mediaStarted)
-    }
-
-    func testBookmarkLabelUsesTheNote() {
-        XCTAssertEqual(Marker(t: 1, kind: .bookmark, note: "call Dylan").label, "call Dylan")
-        XCTAssertEqual(Marker(t: 1, kind: .bookmark).label, "Marked")
+    func testMomentLooksBackwardsNotAround() {
+        // An idea arrives after whatever caused it.
+        let m = Moment(t: 300)
+        XCTAssertEqual(m.playbackStart, 180)
+        XCTAssertEqual(Moment(t: 30).playbackStart, 0, "never seek before the start")
     }
 }

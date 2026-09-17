@@ -26,10 +26,11 @@ public final class SessionController: ObservableObject {
     @Published public private(set) var watchReady = false
     @Published public private(set) var isEnrolled = false
     @Published public private(set) var micLive = true
+    /// Ambient mode is a journal, not coaching: it records and logs context,
+    /// and never fires a cue.
     @Published public private(set) var isAmbient = false
-    @Published public private(set) var timeline = AmbientTimeline()
-    @Published public private(set) var headphonesOn = false
-    @Published public private(set) var mediaPlaying = false
+    @Published public private(set) var contextEvents: [ContextEvent] = []
+    @Published public private(set) var moments: [Moment] = []
 
     public var metronomeEnabled: Bool {
         get { settings.metronomeEnabled }
@@ -41,6 +42,7 @@ public final class SessionController: ObservableObject {
     private let analyzer = FrameAnalyzer(sampleRate: Float(AudioCapture.sampleRate))
     private let dspQueue = DispatchQueue(label: "cadence.dsp", qos: .userInitiated)
     private let assembler = TranscriptAssembler()
+    private let ambient = AmbientMonitor()
     private var classifier: SpeakerClassifier = NearFieldClassifier()
     private let turns = TurnTracker()
     private let engine = DivergenceEngine()
@@ -154,25 +156,6 @@ public final class SessionController: ObservableObject {
 
     // MARK: - Control
 
-    private func mark(_ kind: Marker.Kind, note: String? = nil) {
-        timeline.add(Marker(t: elapsed, kind: kind, note: note))
-    }
-
-    /// The button. Drops a bookmark you can jump back to, from either device.
-    public func markMoment(note: String? = nil) {
-        guard isRunning else { return }
-        mark(.bookmark, note: note)
-        cuePlayer.play(.sessionStart, channels: [.haptic], tier: 1)
-        watch.send(.sessionStart, strain: divergence.strain, channels: [.haptic], tier: 1)
-    }
-
-    /// Ambient capture: record and transcribe continuously, coach nothing.
-    /// No cues fire, so it can run all day without buzzing at you.
-    public func startAmbient() throws {
-        isAmbient = true
-        try start()
-    }
-
     public func applySensitivity(_ value: Double) {
         policy.applySensitivity(Float(value))
     }
@@ -222,16 +205,40 @@ public final class SessionController: ObservableObject {
         isEnrolled = false
     }
 
+    /// Always-on capture with no coaching. Same recorder, same transcript, same
+    /// context log — the cue engine simply never runs.
+    public func startAmbient() throws {
+        isAmbient = true
+        try start(coaching: false)
+    }
+
+    /// The button. Drops a bookmark you can jump back to, from either device.
+    public func markMoment(note: String? = nil) {
+        guard isRunning else { return }
+        let m = Moment(t: elapsed, note: note)
+        moments.append(m)
+        ambient.mark(note: note)
+        // Confirm the press on whichever devices are enabled.
+        deliver(.sessionStart, channels: [.haptic], tier: 1)
+    }
+
     public func start() throws {
+        isAmbient = false
+        try start(coaching: true)
+    }
+
+    private func start(coaching: Bool) throws {
         guard AVAudioApplication.shared.recordPermission == .granted else {
             throw NSError(domain: "Cadence", code: 3, userInfo: [
                 NSLocalizedDescriptionKey: "Microphone access is off. Turn it on in iOS Settings, Self Attune, Microphone."
             ])
         }
-        guard classifier.isCalibrated else {
-            throw NSError(domain: "Cadence", code: 2, userInfo: [
-                NSLocalizedDescriptionKey: "Record your voice profile first — Settings, then Re-record voice profile."
-            ])
+        if coaching {
+            guard classifier.isCalibrated else {
+                throw NSError(domain: "Cadence", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "Record your voice profile first — Settings, then Re-record voice profile."
+                ])
+            }
         }
         sessionID = UUID(); startedAt = Date()
         frameIndex = 0; frames.removeAll(); elapsed = 0
@@ -245,6 +252,8 @@ public final class SessionController: ObservableObject {
         lastRecognizerRestart = 0
         warning = nil
         escalation.reset()
+        contextEvents.removeAll(); moments.removeAll()
+        ambient.begin()
 
         sessionDir = store.directory(for: sessionID)
         if let dir = sessionDir {
@@ -287,6 +296,7 @@ public final class SessionController: ObservableObject {
         assembler.finish(text: liveText, at: elapsed)
         utterances = assembler.utterances
         captureToDisk = false
+        ambient.end()
         let hasAudio = recorder.finish()
         mark(.sessionEnd)
         watch.send(.sessionEnd, strain: 0, channels: .silent, tier: 1)
