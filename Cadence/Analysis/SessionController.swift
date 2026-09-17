@@ -32,6 +32,15 @@ public final class SessionController: ObservableObject {
     @Published public private(set) var contextEvents: [ContextEvent] = []
     @Published public private(set) var moments: [Moment] = []
 
+    /// Derived, not stored — one source of truth for the audio environment.
+    public var mediaPlaying: Bool {
+        AmbientTimeline(events: contextEvents).mediaWasPlaying(at: elapsed)
+    }
+    /// True when playback is going somewhere the microphone cannot hear.
+    public var headphonesOn: Bool {
+        !AmbientTimeline(events: contextEvents).playbackWasCaptured(at: elapsed)
+    }
+
     public var metronomeEnabled: Bool {
         get { settings.metronomeEnabled }
         set { settings.metronomeEnabled = newValue }
@@ -272,7 +281,6 @@ public final class SessionController: ObservableObject {
         captureToDisk = false
         ambient.end()
         let hasAudio = recorder.finish()
-        mark(.sessionEnd)
         watch.send(.sessionEnd, strain: 0, channels: .silent, tier: 1)
         isRunning = false
 
@@ -288,7 +296,7 @@ public final class SessionController: ObservableObject {
             utterances: utterances,
             insights: Insights.derive(from: utterances, turns: turns.turns),
             hasAudio: hasAudio,
-            timeline: timeline,
+            timeline: AmbientTimeline(events: contextEvents, moments: moments),
             isAmbient: isAmbient
         )
         sessionTitle = ""
