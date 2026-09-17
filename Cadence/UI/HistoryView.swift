@@ -134,55 +134,6 @@ struct SessionDetailView: View {
         .onDisappear { player?.stop() }
     }
 
-    /// Jump straight back to what was happening when an idea landed. Playback
-    /// starts before the press, because the cause precedes the thought.
-    private var momentsCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Marked moments").font(.subheadline.weight(.medium))
-                ForEach(summary.timeline.moments) { m in
-                    Button {
-                        if player == nil, let url = store.audioURL(for: summary.id) {
-                            player = try? AVAudioPlayer(contentsOf: url)
-                        }
-                        player?.currentTime = m.playbackStart
-                        player?.play(); playing = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "bookmark.fill").foregroundStyle(Ink.drifting)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(m.note ?? "Marked").font(.subheadline)
-                                Text("plays from \(timeString(m.playbackStart))")
-                                    .font(.caption2).foregroundStyle(.tertiary)
-                            }
-                            Spacer()
-                            Image(systemName: "play.circle").foregroundStyle(.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    Text(summary.timeline.context(at: m.t))
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    /// Honest about what is missing. A silent stretch with no explanation is
-    /// worse than one labelled "headphones".
-    private var gapsCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Not captured").font(.subheadline.weight(.medium))
-                ForEach(Array(summary.timeline.uncapturedRanges(upTo: summary.duration).enumerated()), id: \.offset) { _, r in
-                    Text("\(timeString(r.lowerBound)) – \(timeString(r.upperBound))")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Text("Audio played to headphones never reaches the microphone, so it cannot be recorded by any app. The conversation itself was still captured.")
-                    .font(.caption2).foregroundStyle(.tertiary)
-            }
-        }
-    }
-
     private var statsCard: some View {
         Card {
             HStack {

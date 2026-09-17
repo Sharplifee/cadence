@@ -63,6 +63,8 @@ public struct Moment: Codable, Sendable, Identifiable {
     }
 
     public var playbackStart: TimeInterval { max(0, t - lookbackSeconds) }
+
+    public var label: String { note ?? "Marked" }
 }
 
 /// Answers "what was I hearing at 14:32" from the event log.
@@ -99,6 +101,28 @@ public struct AmbientTimeline: Codable, Sendable {
         case (true, false): return "Media was playing through headphones, so it is not in the recording."
         case (false, _):    return "No other audio was playing."
         }
+    }
+
+    /// What the audio environment was doing in the window a mark refers to.
+    /// Marks themselves are excluded — you pressed the button, you know that.
+    public func context(around m: Moment) -> [ContextEvent] {
+        events
+            .filter { $0.kind != .marked }
+            .filter { $0.t >= m.playbackStart && $0.t <= m.t }
+            .sorted { $0.t < $1.t }
+    }
+
+    /// The review UI's vocabulary. `markers` is everything that happened to the
+    /// audio environment; `bookmarks` is only what Connor deliberately marked.
+    public var markers: [ContextEvent] { events.sorted { $0.t < $1.t } }
+    public var bookmarks: [Moment] { moments.sorted { $0.t < $1.t } }
+
+    public func audioGaps(upTo end: TimeInterval) -> [ClosedRange<TimeInterval>] {
+        uncapturedRanges(upTo: end)
+    }
+
+    public func gapSeconds(upTo end: TimeInterval) -> TimeInterval {
+        audioGaps(upTo: end).reduce(0) { $0 + ($1.upperBound - $1.lowerBound) }
     }
 
     /// Stretches where the recording will be missing whatever was played.

@@ -586,3 +586,41 @@ final class AmbientTimelineTests: XCTestCase {
         XCTAssertEqual(Moment(t: 30).playbackStart, 0, "never seek before the start")
     }
 }
+
+final class AmbientReviewAPITests: XCTestCase {
+    func testBookmarkLabelFallsBackToMarked() {
+        XCTAssertEqual(Moment(t: 1, note: "call Dylan").label, "call Dylan")
+        XCTAssertEqual(Moment(t: 1).label, "Marked")
+    }
+
+    func testContextAroundAMarkUsesTheLookbackWindow() {
+        let mark = Moment(t: 300)          // window is 180...300
+        let t = AmbientTimeline(events: [
+            .init(t: 100, kind: .mediaStarted),   // before the window
+            .init(t: 200, kind: .routeToBluetooth, detail: "AirPods"),
+            .init(t: 250, kind: .marked),         // excluded: it is the press
+            .init(t: 400, kind: .mediaStopped)    // after
+        ], moments: [mark])
+        let ctx = t.context(around: mark)
+        XCTAssertEqual(ctx.count, 1)
+        XCTAssertEqual(ctx[0].kind, .routeToBluetooth)
+    }
+
+    func testGapSecondsTotalsEveryUncapturedRange() {
+        let t = AmbientTimeline(events: [
+            .init(t: 10, kind: .routeToHeadphones),
+            .init(t: 40, kind: .routeToSpeaker),
+            .init(t: 60, kind: .micPaused),
+            .init(t: 70, kind: .micResumed)
+        ])
+        XCTAssertEqual(t.gapSeconds(upTo: 100), 40, accuracy: 0.01)
+    }
+
+    func testMarkersAndBookmarksComeBackSorted() {
+        let t = AmbientTimeline(
+            events: [.init(t: 50, kind: .mediaStopped), .init(t: 10, kind: .mediaStarted)],
+            moments: [Moment(t: 90), Moment(t: 20)])
+        XCTAssertEqual(t.markers.map(\.t), [10, 50])
+        XCTAssertEqual(t.bookmarks.map(\.t), [20, 90])
+    }
+}
