@@ -39,8 +39,9 @@ public final class AudioCapture {
 
     public private(set) var isCapturing = false
     private var wantsCapture = false
-
-    public var isOtherAudioPlaying: Bool { session.isOtherAudioPlaying }
+    /// Last known other-audio state. There is no notification for this, so it
+    /// is polled in the audio tap and only reported when it actually changes.
+    private var lastOtherAudio = false
 
     /// Where playback is going. The mic records the room, so speaker audio is
     /// already in the recording and AirPods audio never can be.
