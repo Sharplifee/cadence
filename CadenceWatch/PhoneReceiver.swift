@@ -87,15 +87,6 @@ public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate 
         markCount += 1
     }
 
-    /// Long-press the ring to bookmark the moment. The mark looks backwards,
-    /// so pressing a beat late still catches what caused the thought.
-    public func markMoment() {
-        guard active, WCSession.default.isReachable else { return }
-        WCSession.default.sendMessageData(Data([CueCode.metronomeTick.rawValue, 0, 0, 1]),
-                                          replyHandler: nil, errorHandler: nil)
-        cuePlayer.play(.sessionStart, channels: [.haptic], tier: 1)
-    }
-
     nonisolated public func session(_ s: WCSession,
                                     activationDidCompleteWith state: WCSessionActivationState,
                                     error: Error?) {}
