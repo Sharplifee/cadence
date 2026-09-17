@@ -316,7 +316,6 @@ public final class SessionController: ObservableObject {
             cues: policy.events,
             correctionRate: policy.correctionRate,
             title: sessionTitle.isEmpty ? nil : sessionTitle,
-            timeline: timeline,
             utterances: utterances,
             insights: Insights.derive(from: utterances, turns: turns.turns),
             hasAudio: hasAudio,
@@ -351,10 +350,6 @@ public final class SessionController: ObservableObject {
         currentSpeaker = speaker
 
         assembler.observe(speaker: speaker, dbfs: r.dbfs, at: t)
-
-        // Record only what CHANGED, once a second. An hour of identical
-        // readings is not a timeline, it is 7,200 rows of noise.
-        if frameIndex % 2 == 0 { sampleEnvironment(at: t) }
 
         // There is no notification for "another app began playing", so this is
         // sampled. Every 2s is far finer than the timeline needs and costs a

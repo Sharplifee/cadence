@@ -23,6 +23,11 @@ jobs:
       - name: Check for duplicate declarations
         run: python3 scripts/check_duplicates.py
 
+      - name: Lint for duplicate declarations and dead calls
+        # The Apple layer cannot be type-checked off a Mac, so these two classes
+        # of error used to surface only after a ten-minute macOS build.
+        run: python3 scripts/lint_swift.py Cadence CadenceWatch
+
       - name: Parse-check the Apple layer
         # Full type-checking needs the macOS SDK, but syntax errors are catchable
         # here — and catching them here saves a ten-minute macOS round trip.
