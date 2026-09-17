@@ -10,8 +10,6 @@ public final class WatchBridge: NSObject, WCSessionDelegate {
 
     /// Called when the watch asks the phone to start or stop.
     public var onRemoteToggle: ((Bool) -> Void)?
-    /// Called when the watch bookmarks a moment.
-    public var onRemoteMark: (() -> Void)?
     /// The wrist asked to bookmark this moment.
     public var onRemoteMark: (() -> Void)?
 
