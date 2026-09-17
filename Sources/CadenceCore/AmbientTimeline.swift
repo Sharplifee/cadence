@@ -143,6 +143,12 @@ public struct AmbientTimeline: Codable, Sendable {
         return ranges
     }
 
+    /// The review screen's name for the same thing: stretches of the recording
+    /// where sound was not reaching the microphone.
+    public func audioGaps(upTo end: TimeInterval) -> [ClosedRange<TimeInterval>] {
+        uncapturedRanges(upTo: end)
+    }
+
     public func gapSeconds(upTo end: TimeInterval) -> TimeInterval {
         uncapturedRanges(upTo: end).reduce(0) { $0 + ($1.upperBound - $1.lowerBound) }
     }

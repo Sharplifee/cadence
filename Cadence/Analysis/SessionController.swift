@@ -30,6 +30,12 @@ public final class SessionController: ObservableObject {
     /// and never fires a cue.
     @Published public private(set) var isAmbient = false
     @Published public private(set) var contextEvents: [ContextEvent] = []
+
+    /// The live view of the session's context, assembled from what has been
+    /// recorded so far — same type the saved summary carries.
+    public var timeline: AmbientTimeline {
+        AmbientTimeline(events: contextEvents, moments: moments)
+    }
     @Published public private(set) var moments: [Moment] = []
 
     /// Derived, not stored — one source of truth for the audio environment.
