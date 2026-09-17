@@ -96,31 +96,9 @@ public final class SessionController: ObservableObject {
                 guard let self else { return }
                 self.micLive = available
                 self.warning = available ? nil : message
-                guard self.isRunning else { return }
-                self.mark(available ? .captureResumed : .captureLost)
-            }
-        }
-
-        // Media out loud IS in the recording — the mic hears it. This marker
-        // exists so you can see what was playing when an idea landed.
-        capture.onOtherAudioChange = { [weak self] playing in
-            Task { @MainActor in
-                guard let self else { return }
-                self.mediaPlaying = playing
-                guard self.isRunning else { return }
-                self.mark(playing ? .mediaStarted : .mediaStopped)
-            }
-        }
-
-        // Headphones are different: that audio never reaches the mic, so the
-        // recording genuinely has a hole in it and must say so.
-        capture.onHeadphonesChange = { [weak self] connected in
-            Task { @MainActor in
-                guard let self else { return }
-                guard connected != self.headphonesOn else { return }
-                self.headphonesOn = connected
-                guard self.isRunning else { return }
-                self.mark(connected ? .headphonesConnected : .headphonesDisconnected)
+                if self.isRunning {
+                    available ? self.ambient.noteMicResumed() : self.ambient.noteMicPaused()
+                }
             }
         }
         policy.applySensitivity(0.5)
@@ -244,10 +222,6 @@ public final class SessionController: ObservableObject {
         frameIndex = 0; frames.removeAll(); elapsed = 0
         lastCue = .none; divergence = .matched
         assembler.reset(); utterances.removeAll(); liveText = ""
-        timeline = AmbientTimeline()
-        timeline.add(Marker(t: 0, kind: .sessionStart))
-        headphonesOn = capture.headphonesConnected
-        if headphonesOn { timeline.add(Marker(t: 0, kind: .headphonesConnected)) }
         scoredCueCount = 0; lastScoredCorrection = -1
         lastRecognizerRestart = 0
         warning = nil
