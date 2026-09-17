@@ -74,6 +74,7 @@ public final class SessionController: ObservableObject {
     private var sessionDir: URL?
     private var lastRecognizerRestart: TimeInterval = 0
     private var captureToDisk = false
+    private var lastAmbientPoll: TimeInterval = 0
     private var scoredCueCount = 0
     private var lastScoredCorrection = -1
 
@@ -128,6 +129,12 @@ public final class SessionController: ObservableObject {
 
         watch.onRemoteMark = { [weak self] in
             Task { @MainActor in self?.markMoment() }
+        }
+
+        // Nothing was consuming the monitor, so every saved timeline was empty
+        // and the review screen had no context to show.
+        ambient.onEvent = { [weak self] event in
+            Task { @MainActor in self?.contextEvents.append(event) }
         }
 
         transcriber.onPartial = { [weak self] text in
@@ -233,6 +240,7 @@ public final class SessionController: ObservableObject {
         assembler.reset(); utterances.removeAll(); liveText = ""
         scoredCueCount = 0; lastScoredCorrection = -1
         lastRecognizerRestart = 0
+        lastAmbientPoll = 0
         warning = nil
         escalation.reset()
         contextEvents.removeAll(); moments.removeAll()
@@ -327,6 +335,14 @@ public final class SessionController: ObservableObject {
         currentSpeaker = speaker
 
         assembler.observe(speaker: speaker, dbfs: r.dbfs, at: t)
+
+        // There is no notification for "another app began playing", so this is
+        // sampled. Every 2s is far finer than the timeline needs and costs a
+        // single property read.
+        if t - lastAmbientPoll >= 2 {
+            lastAmbientPoll = t
+            ambient.poll()
+        }
 
         // SFSpeechRecognizer stops silently after roughly a minute per task.
         // Cycle it during a pause, and tell the assembler — its committed
