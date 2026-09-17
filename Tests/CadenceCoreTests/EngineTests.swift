@@ -539,88 +539,77 @@ final class FrameAnalyzerTests: XCTestCase {
 }
 
 final class AmbientTimelineTests: XCTestCase {
-    func testSpeakerPlaybackIsCaptured() {
-        let t = AmbientTimeline(events: [
-            .init(t: 0, kind: .routeToSpeaker),
-            .init(t: 10, kind: .mediaStarted, detail: "Media started")
-        ])
-        XCTAssertTrue(t.playbackWasCaptured(at: 20))
-        XCTAssertTrue(t.mediaWasPlaying(at: 20))
-        XCTAssertTrue(t.context(at: 20).contains("is in the recording"))
+    func testAMarkLooksBackwardsNotAround() {
+        // An idea arrives after whatever caused it, so the useful audio is the
+        // two minutes you just lived through.
+        let m = Moment(t: 600)
+        XCTAssertEqual(m.playbackStart, 480, accuracy: 0.01)
+        XCTAssertEqual(m.window.upperBound, 600, accuracy: 0.01)
     }
 
-    func testHeadphonePlaybackIsNotCapturedAndSaysSo() {
-        let t = AmbientTimeline(events: [
-            .init(t: 0, kind: .routeToSpeaker),
-            .init(t: 5, kind: .routeToBluetooth, detail: "AirPods"),
-            .init(t: 6, kind: .mediaStarted)
-        ])
-        XCTAssertFalse(t.playbackWasCaptured(at: 10))
-        XCTAssertTrue(t.context(at: 10).contains("not in the recording"))
+    func testMarkNearTheStartDoesNotGoNegative() {
+        XCTAssertEqual(Moment(t: 30).playbackStart, 0, accuracy: 0.01)
     }
 
-    func testDefaultsToCapturedBeforeAnyRouteEvent() {
-        XCTAssertTrue(AmbientTimeline().playbackWasCaptured(at: 99))
+    func testSpeakerPlaybackIsCapturedAndAirPodsIsNot() {
+        var tl = AmbientTimeline()
+        tl.record(ContextEvent(t: 0, kind: .routeToSpeaker))
+        tl.record(ContextEvent(t: 10, kind: .mediaStarted, detail: "YouTube"))
+        XCTAssertTrue(tl.playbackWasCaptured(at: 20))
+        XCTAssertTrue(tl.mediaWasPlaying(at: 20))
+        XCTAssertTrue(tl.context(at: 20).contains("in the recording"))
+
+        tl.record(ContextEvent(t: 30, kind: .routeToBluetooth, detail: "AirPods"))
+        XCTAssertFalse(tl.playbackWasCaptured(at: 40))
     }
 
-    func testUncapturedRangeClosesOnReturnToSpeaker() {
-        let t = AmbientTimeline(events: [
-            .init(t: 10, kind: .routeToHeadphones),
-            .init(t: 40, kind: .routeToSpeaker)
-        ])
-        let r = t.uncapturedRanges(upTo: 100)
-        XCTAssertEqual(r.count, 1)
-        XCTAssertEqual(r[0].lowerBound, 10)
-        XCTAssertEqual(r[0].upperBound, 40)
+    func testDefaultsToSpeakerWhenNothingChangedTheRoute() {
+        let tl = AmbientTimeline()
+        XCTAssertTrue(tl.playbackWasCaptured(at: 100),
+                      "a phone with no route change is on its speaker")
     }
 
-    func testUncapturedRangeRunsToTheEndIfNeverClosed() {
-        let t = AmbientTimeline(events: [.init(t: 10, kind: .routeToHeadphones)])
-        XCTAssertEqual(t.uncapturedRanges(upTo: 300).first?.upperBound, 300)
+    func testMediaStopsWhenStopped() {
+        var tl = AmbientTimeline()
+        tl.record(ContextEvent(t: 5, kind: .mediaStarted))
+        tl.record(ContextEvent(t: 50, kind: .mediaStopped))
+        XCTAssertTrue(tl.mediaWasPlaying(at: 20))
+        XCTAssertFalse(tl.mediaWasPlaying(at: 60))
     }
 
-    func testMomentLooksBackwardsNotAround() {
-        // An idea arrives after whatever caused it.
-        let m = Moment(t: 300)
-        XCTAssertEqual(m.playbackStart, 180)
-        XCTAssertEqual(Moment(t: 30).playbackStart, 0, "never seek before the start")
+    func testMarksAreSeparatedFromEnvironmentEvents() {
+        var tl = AmbientTimeline()
+        tl.record(ContextEvent(t: 1, kind: .routeToSpeaker))
+        tl.mark(Moment(t: 20, note: "ring animation idea"))
+        XCTAssertEqual(tl.bookmarks.count, 1)
+        XCTAssertEqual(tl.bookmarks[0].label, "ring animation idea")
+        XCTAssertFalse(tl.markers.contains { $0.kind == .marked },
+                       "a mark is the press, not something the environment did")
+    }
+
+    func testMicPauseCountsAsNotCapturing() {
+        var tl = AmbientTimeline()
+        tl.record(ContextEvent(t: 10, kind: .micPaused, detail: "phone call"))
+        XCTAssertFalse(tl.playbackWasCaptured(at: 20))
+        tl.record(ContextEvent(t: 40, kind: .micResumed))
+        XCTAssertTrue(tl.playbackWasCaptured(at: 50))
     }
 }
 
-final class AmbientReviewAPITests: XCTestCase {
-    func testBookmarkLabelFallsBackToMarked() {
-        XCTAssertEqual(Moment(t: 1, note: "call Dylan").label, "call Dylan")
-        XCTAssertEqual(Moment(t: 1).label, "Marked")
+final class AudioRouteKindTests: XCTestCase {
+    func testOnlyRoutesTheMicHearsCountAsCaptured() {
+        XCTAssertTrue(AudioRouteKind.speaker.audibleToMic)
+        XCTAssertTrue(AudioRouteKind.external.audibleToMic)
+        XCTAssertFalse(AudioRouteKind.bluetooth.audibleToMic)
+        XCTAssertFalse(AudioRouteKind.headphones.audibleToMic)
+        XCTAssertFalse(AudioRouteKind.receiver.audibleToMic)
     }
 
-    func testContextAroundAMarkUsesTheLookbackWindow() {
-        let mark = Moment(t: 300)          // window is 180...300
-        let t = AmbientTimeline(events: [
-            .init(t: 100, kind: .mediaStarted),   // before the window
-            .init(t: 200, kind: .routeToBluetooth, detail: "AirPods"),
-            .init(t: 250, kind: .marked),         // excluded: it is the press
-            .init(t: 400, kind: .mediaStopped)    // after
-        ], moments: [mark])
-        let ctx = t.context(around: mark)
-        XCTAssertEqual(ctx.count, 1)
-        XCTAssertEqual(ctx[0].kind, .routeToBluetooth)
-    }
-
-    func testGapSecondsTotalsEveryUncapturedRange() {
-        let t = AmbientTimeline(events: [
-            .init(t: 10, kind: .routeToHeadphones),
-            .init(t: 40, kind: .routeToSpeaker),
-            .init(t: 60, kind: .micPaused),
-            .init(t: 70, kind: .micResumed)
-        ])
-        XCTAssertEqual(t.gapSeconds(upTo: 100), 40, accuracy: 0.01)
-    }
-
-    func testMarkersAndBookmarksComeBackSorted() {
-        let t = AmbientTimeline(
-            events: [.init(t: 50, kind: .mediaStopped), .init(t: 10, kind: .mediaStarted)],
-            moments: [Moment(t: 90), Moment(t: 20)])
-        XCTAssertEqual(t.markers.map(\.t), [10, 50])
-        XCTAssertEqual(t.bookmarks.map(\.t), [20, 90])
+    func testEachRouteMapsToATimelineEventThatAgreesWithItself() {
+        for r in AudioRouteKind.allCases {
+            let captures = ContextEvent(t: 0, kind: r.event).capturesAudio
+            XCTAssertEqual(captures, r.audibleToMic,
+                           "\(r.label) disagrees with the event it emits")
+        }
     }
 }

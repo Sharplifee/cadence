@@ -38,19 +38,23 @@ public final class AudioCapture {
 
     public private(set) var isCapturing = false
     private var wantsCapture = false
-    private var lastOtherAudio = false
 
-    public init() {
-        let nc = NotificationCenter.default
-        nc.addObserver(self, selector: #selector(handleInterruption),
-                       name: AVAudioSession.interruptionNotification, object: session)
-        nc.addObserver(self, selector: #selector(handleRouteChange),
-                       name: AVAudioSession.routeChangeNotification, object: session)
-        nc.addObserver(self, selector: #selector(handleEngineConfigChange),
-                       name: .AVAudioEngineConfigurationChange, object: engine)
+    public var isOtherAudioPlaying: Bool { session.isOtherAudioPlaying }
+
+    /// Where playback is going. The mic records the room, so speaker audio is
+    /// already in the recording and AirPods audio never can be.
+    public var routeKind: AudioRouteKind {
+        switch session.currentRoute.outputs.first?.portType {
+        case .some(.builtInSpeaker):                   return .speaker
+        case .some(.builtInReceiver):                  return .receiver
+        case .some(.headphones), .some(.usbAudio):     return .headphones
+        case .some(.bluetoothA2DP), .some(.bluetoothLE), .some(.bluetoothHFP):
+                                                       return .bluetooth
+        case .some(.carAudio), .some(.airPlay), .some(.HDMI):
+                                                       return .external
+        default:                                       return .speaker
+        }
     }
-
-    deinit { NotificationCenter.default.removeObserver(self) }
 
     public func start() throws {
         wantsCapture = true

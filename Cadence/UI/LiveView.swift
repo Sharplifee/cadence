@@ -84,6 +84,10 @@ struct LiveView: View {
                         .foregroundStyle(controller.micLive ? speakerColor : Ink.runaway)
                 }
                 LevelMeter(dbfs: controller.level, color: speakerColor)
+                if !controller.mediaCaptured {
+                    Text("Audio is playing through headphones, so it is not reaching the mic and will not be in this recording.")
+                        .font(.caption2).foregroundStyle(Ink.drifting)
+                }
                 if controller.moments.count > 0 {
                     Text("\(controller.moments.count) marked")
                         .font(.caption2).foregroundStyle(.tertiary)
@@ -255,6 +259,25 @@ struct LiveView: View {
                 }
                 .background(Ink.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .foregroundStyle(.primary)
+            }
+
+            if controller.isRunning {
+                Button { controller.mark() } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "bookmark.fill")
+                        Text("Mark this moment").font(.headline)
+                        if !controller.moments.isEmpty {
+                            Text("\(controller.moments.count)")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(.white.opacity(0.15), in: Capsule())
+                        }
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 15)
+                }
+                .background(Ink.them.opacity(0.9),
+                            in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .foregroundStyle(Ink.bg)
             }
 
             Toggle("Metronome mode", isOn: Binding(

@@ -26,6 +26,9 @@ public final class SessionController: ObservableObject {
     @Published public private(set) var watchReady = false
     @Published public private(set) var isEnrolled = false
     @Published public private(set) var micLive = true
+    @Published public private(set) var moments: [Moment] = []
+    @Published public private(set) var contextEvents: [ContextEvent] = []
+    @Published public private(set) var mediaCaptured = true
     /// Ambient mode is a journal, not coaching: it records and logs context,
     /// and never fires a cue.
     @Published public private(set) var isAmbient = false
@@ -57,6 +60,9 @@ public final class SessionController: ObservableObject {
     private let analyzer = FrameAnalyzer(sampleRate: Float(AudioCapture.sampleRate))
     private let dspQueue = DispatchQueue(label: "cadence.dsp", qos: .userInitiated)
     private let assembler = TranscriptAssembler()
+    private var timeline = AmbientTimeline()
+    private var lastRoute: AudioRouteKind = .speaker
+    private var lastMediaPlaying = false
     private let ambient = AmbientMonitor()
     private var classifier: SpeakerClassifier = NearFieldClassifier()
     private let turns = TurnTracker()
@@ -113,6 +119,13 @@ public final class SessionController: ObservableObject {
                 self.micLive = available
                 self.warning = available ? nil : message
                 if self.isRunning {
+                    self.timeline.record(ContextEvent(
+                        t: self.elapsed,
+                        kind: available ? .micResumed : .micPaused,
+                        detail: available ? nil : message))
+                    self.contextEvents = self.timeline.markers
+                }
+                if self.isRunning {
                     available ? self.ambient.noteMicResumed() : self.ambient.noteMicPaused()
                 }
             }
@@ -143,6 +156,11 @@ public final class SessionController: ObservableObject {
             Task { @MainActor in self?.contextEvents.append(event) }
         }
 
+        watch.onRemoteMark = { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.mark()
+        }
+
         transcriber.onPartial = { [weak self] text in
             self?.ingestRecognizedText(text)
         }
@@ -158,6 +176,35 @@ public final class SessionController: ObservableObject {
 
     public func applySensitivity(_ value: Double) {
         policy.applySensitivity(Float(value))
+    }
+
+    /// Drop a bookmark at this instant. The whole point of recording ambiently
+    /// is being able to get back to the moment an idea landed, and scrubbing an
+    /// hour of audio to find it is not getting back to it.
+    public func mark(note: String? = nil) {
+        let m = Moment(t: elapsed, note: note)
+        timeline.mark(m)
+        moments = timeline.bookmarks
+        cuePlayer.play(.sessionStart, channels: [.haptic], tier: 1)
+        watch.send(.sessionStart, strain: divergence.strain, channels: [.haptic], tier: 1)
+    }
+
+    /// Only changes are recorded, and the mic-availability change already
+    /// arrives as its own callback.
+    private func sampleEnvironment(at t: TimeInterval) {
+        let route = capture.routeKind
+        if route != lastRoute {
+            lastRoute = route
+            timeline.record(ContextEvent(t: t, kind: route.event, detail: route.label))
+            contextEvents = timeline.markers
+        }
+        let playing = capture.isOtherAudioPlaying
+        if playing != lastMediaPlaying {
+            lastMediaPlaying = playing
+            timeline.record(ContextEvent(t: t, kind: playing ? .mediaStarted : .mediaStopped))
+            contextEvents = timeline.markers
+        }
+        mediaCaptured = timeline.playbackWasCaptured(at: t)
     }
 
     /// Fires a cue on demand across whatever channels are enabled, for the
@@ -244,6 +291,10 @@ public final class SessionController: ObservableObject {
         frameIndex = 0; frames.removeAll(); elapsed = 0
         lastCue = .none; divergence = .matched
         assembler.reset(); utterances.removeAll(); liveText = ""
+        timeline = AmbientTimeline(); contextEvents.removeAll(); moments.removeAll()
+        lastRoute = capture.routeKind
+        lastMediaPlaying = capture.isOtherAudioPlaying
+        timeline.record(ContextEvent(t: 0, kind: lastRoute.event))
         scoredCueCount = 0; lastScoredCorrection = -1
         lastRecognizerRestart = 0
         lastAmbientPoll = 0
@@ -292,6 +343,7 @@ public final class SessionController: ObservableObject {
         transcriber.stop(); transcribing = false
         assembler.finish(text: liveText, at: elapsed)
         utterances = assembler.utterances
+
         captureToDisk = false
         ambient.end()
         let hasAudio = recorder.finish()
@@ -307,6 +359,7 @@ public final class SessionController: ObservableObject {
             cues: policy.events,
             correctionRate: policy.correctionRate,
             title: sessionTitle.isEmpty ? nil : sessionTitle,
+            timeline: timeline,
             utterances: utterances,
             insights: Insights.derive(from: utterances, turns: turns.turns),
             hasAudio: hasAudio,
@@ -341,6 +394,10 @@ public final class SessionController: ObservableObject {
         currentSpeaker = speaker
 
         assembler.observe(speaker: speaker, dbfs: r.dbfs, at: t)
+
+        // Record only what CHANGED, once a second. An hour of identical
+        // readings is not a timeline, it is 7,200 rows of noise.
+        if frameIndex % 2 == 0 { sampleEnvironment(at: t) }
 
         // There is no notification for "another app began playing", so this is
         // sampled. Every 2s is far finer than the timeline needs and costs a
