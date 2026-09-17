@@ -15,7 +15,6 @@ public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate 
     @Published public var talkShare: Double = 0.5
     @Published public var pending = false
     @Published public var markCount = 0
-    @Published public var markCount = 0
 
     public let cuePlayer = WatchCuePlayer()
     public let runtime = WorkoutRuntime()
@@ -82,16 +81,6 @@ public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate 
     /// Mark this moment on the phone's recording, from the wrist.
     public func markMoment() {
         guard WCSession.default.isReachable, active else { return }
-        WCSession.default.sendMessageData(Data([CueCode.markMoment.rawValue, 0, 0, 1]),
-                                          replyHandler: nil, errorHandler: nil)
-        cuePlayer.play(.markMoment, channels: [.haptic], tier: 1)
-        markCount += 1
-    }
-
-    /// Bookmark the moment from the wrist. The whole point is not reaching for
-    /// the phone when an idea lands.
-    public func requestMark() {
-        guard active, WCSession.default.isReachable else { return }
         WCSession.default.sendMessageData(Data([CueCode.markMoment.rawValue, 0, 0, 1]),
                                           replyHandler: nil, errorHandler: nil)
         cuePlayer.play(.markMoment, channels: [.haptic], tier: 1)

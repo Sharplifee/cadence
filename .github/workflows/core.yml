@@ -18,6 +18,11 @@ jobs:
         run: swift build
       - name: Test
         run: swift test --enable-code-coverage
+      # swiftc -parse is syntax-only, so a duplicate declaration sails through
+      # here and only fails type-checking on the macOS runner ten minutes later.
+      - name: Check for duplicate declarations
+        run: python3 scripts/check_duplicates.py
+
       - name: Parse-check the Apple layer
         # Full type-checking needs the macOS SDK, but syntax errors are catchable
         # here — and catching them here saves a ten-minute macOS round trip.
