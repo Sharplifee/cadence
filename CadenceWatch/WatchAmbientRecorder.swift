@@ -24,6 +24,7 @@ public final class WatchAmbientRecorder: NSObject, ObservableObject {
     public var lookback: TimeInterval = 120
 
     private var buffer = RollingBuffer(window: 600, segmentLength: 30)
+    private let sender = ClipSender()
     private var recorder: AVAudioRecorder?
     private var rotateTimer: Timer?
     private var startedAt = Date()
@@ -112,6 +113,13 @@ public final class WatchAmbientRecorder: NSObject, ObservableObject {
         }
         savedClips += 1
         WKInterfaceDevice.current().play(.success)
+
+        // Hand it to the phone immediately. The watch is the only place this
+        // audio exists until the transfer completes, so nothing is deleted here.
+        let clip = MarkedClip(markedAt: Date(), lookback: lookback,
+                              stage: .sending, note: note,
+                              segments: wanted.map(\.filename))
+        sender.send(clipDirectory: dest, clip: clip)
         return dest
     }
 

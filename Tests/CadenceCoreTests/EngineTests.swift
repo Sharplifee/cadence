@@ -723,3 +723,99 @@ final class RollingBufferRenameTests: XCTestCase {
         XCTAssertTrue(b.segments.isEmpty)
     }
 }
+
+final class MarkedClipTests: XCTestCase {
+    func testHeadlineFallsBackThroughNoteThenCommitmentThenTranscript() {
+        var c = MarkedClip(lookback: 120)
+        XCTAssertEqual(c.headline, c.windowDescription)
+        c.transcript = "some words were said here"
+        XCTAssertEqual(c.headline, "some words were said here")
+        c.commitments = [Commitment(kind: .promise, speaker: .me, at: 5, text: "I'll call him")]
+        XCTAssertEqual(c.headline, "I'll call him")
+        c.note = "the pricing thing"
+        XCTAssertEqual(c.headline, "the pricing thing")
+    }
+
+    func testWindowDescribesWhatTheAudioCoversNotWhenYouPressed() {
+        let c = MarkedClip(markedAt: Date(), lookback: 120)
+        XCTAssertTrue(c.windowDescription.contains("–"),
+                      "review needs the span, not the instant")
+    }
+
+    func testStageLabels() {
+        XCTAssertEqual(MarkedClip(stage: .onWatch).stage.label, "on your watch")
+        XCTAssertTrue(MarkedClip(stage: .processed).isComplete)
+        XCTAssertTrue(MarkedClip(stage: .failed).needsAttention)
+    }
+}
+
+final class ClipLibraryTests: XCTestCase {
+    func testNewestFirst() {
+        let old = MarkedClip(markedAt: Date(timeIntervalSince1970: 1000))
+        let new = MarkedClip(markedAt: Date(timeIntervalSince1970: 2000))
+        var lib = ClipLibrary()
+        lib.upsert(old); lib.upsert(new)
+        XCTAssertEqual(lib.clips.first?.id, new.id)
+    }
+
+    /// The bug this rule exists to prevent: both devices report on one clip and
+    /// messages arrive out of order.
+    func testALateWatchUpdateCannotUndoPhoneProcessing() {
+        let id = UUID()
+        var lib = ClipLibrary()
+        lib.upsert(MarkedClip(id: id, stage: .sending))
+        lib.upsert(MarkedClip(id: id, stage: .processed,
+                              transcript: "done",
+                              commitments: [Commitment(kind: .promise, speaker: .me,
+                                                       at: 1, text: "I'll send it")]))
+        // Watch resends its stale view.
+        lib.upsert(MarkedClip(id: id, stage: .sending))
+
+        XCTAssertEqual(lib.clips.first?.stage, .processed)
+        XCTAssertEqual(lib.clips.first?.transcript, "done")
+        XCTAssertEqual(lib.clips.first?.commitments.count, 1)
+    }
+
+    func testStagesStillMoveForward() {
+        let id = UUID()
+        var lib = ClipLibrary()
+        lib.upsert(MarkedClip(id: id, stage: .onWatch))
+        lib.upsert(MarkedClip(id: id, stage: .arrived))
+        XCTAssertEqual(lib.clips.first?.stage, .arrived)
+    }
+
+    func testANoteIsNeverLostByALaterUpdateThatOmitsIt() {
+        let id = UUID()
+        var lib = ClipLibrary()
+        lib.upsert(MarkedClip(id: id, stage: .onWatch, note: "pricing"))
+        lib.upsert(MarkedClip(id: id, stage: .arrived))
+        XCTAssertEqual(lib.clips.first?.note, "pricing")
+    }
+
+    func testPendingAndFailedAreSeparated() {
+        var lib = ClipLibrary()
+        lib.upsert(MarkedClip(stage: .sending))
+        lib.upsert(MarkedClip(stage: .processed))
+        lib.upsert(MarkedClip(stage: .failed))
+        XCTAssertEqual(lib.pending.count, 1)
+        XCTAssertEqual(lib.failed.count, 1)
+    }
+
+    func testAllCommitmentsFlattensAcrossClips() {
+        var lib = ClipLibrary()
+        lib.upsert(MarkedClip(stage: .processed, commitments: [
+            Commitment(kind: .promise, speaker: .me, at: 1, text: "a"),
+            Commitment(kind: .request, speaker: .them, at: 2, text: "b")]))
+        lib.upsert(MarkedClip(stage: .processed, commitments: [
+            Commitment(kind: .offer, speaker: .me, at: 3, text: "c")]))
+        XCTAssertEqual(lib.allCommitments.count, 3)
+    }
+
+    func testRemove() {
+        let id = UUID()
+        var lib = ClipLibrary()
+        lib.upsert(MarkedClip(id: id))
+        lib.remove(id)
+        XCTAssertTrue(lib.clips.isEmpty)
+    }
+}

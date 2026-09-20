@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct CadenceApp: App {
     @StateObject private var controller = SessionController()
+    @StateObject private var clips = ClipReceiver()
     @AppStorage("hasEnrolled") private var hasEnrolled = false
 
     var body: some Scene {
@@ -18,6 +19,8 @@ struct CadenceApp: App {
                 }
             }
             .environmentObject(controller)
+            .environmentObject(clips)
+            .task { WatchFileBridge.shared.receiver = clips }
             .preferredColorScheme(.dark)
             .tint(Ink.matched)
         }
