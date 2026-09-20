@@ -20,6 +20,9 @@ jobs:
         run: swift test --enable-code-coverage
       # swiftc -parse is syntax-only, so a duplicate declaration sails through
       # here and only fails type-checking on the macOS runner ten minutes later.
+      - name: Install python for the source checks
+        run: apt-get update -qq && apt-get install -y -qq python3 >/dev/null
+
       - name: Check for duplicate declarations
         run: python3 scripts/check_duplicates.py
 
