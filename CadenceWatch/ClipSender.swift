@@ -15,6 +15,25 @@ public final class ClipSender: NSObject, ObservableObject {
 
     private let fm = FileManager.default
 
+    /// Ship one completed loop segment. Unlike a mark this happens without the
+    /// user doing anything, so it must never block the recorder — transferFile
+    /// queues on disk and returns immediately.
+    public func sendSegment(_ url: URL, capturedAt: Date) {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        let meta: [String: Any] = [
+            "clipID": UUID().uuidString,
+            "markedAt": capturedAt.timeIntervalSince1970,
+            "lookback": 0,
+            "note": "",
+            "index": 0,
+            "total": 1,
+            "auto": true
+        ]
+        session.transferFile(url, metadata: meta)
+        queued = session.outstandingFileTransfers.count
+    }
+
     public func send(clipDirectory dir: URL, clip: MarkedClip) {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default

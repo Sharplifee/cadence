@@ -9,6 +9,7 @@ struct SettingsView: View {
     @AppStorage("sensitivity") private var sensitivity: Double = 0.5
     @AppStorage("syncEnabled") private var syncEnabled = false
     @AppStorage("hasEnrolled") private var hasEnrolled = true
+    @AppStorage("loopMinutes") private var loopMinutes = 5
 
     var body: some View {
         NavigationStack {
@@ -21,6 +22,7 @@ struct SettingsView: View {
                         channelsCard
                         escalationCard
                         previewCard
+                        loopCard
                         privacyCard
                         profileCard
                     }
@@ -135,6 +137,23 @@ struct SettingsView: View {
                     }
                 }
                 Text("T1 to T3 plays each escalation tier so you know what the loud one feels like before it happens in company.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    /// The loop runs on the watch, so this writes the preference across and the
+    /// watch picks it up when it next starts.
+    private var loopCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 11) {
+                Text("Loop length").font(.subheadline.weight(.medium))
+                Picker("", selection: $loopMinutes) {
+                    ForEach([1, 3, 5, 10, 15], id: \.self) { Text("\($0) min").tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: loopMinutes) { _, v in controller.setLoopMinutes(v) }
+                Text("Your watch records in \(loopMinutes)-minute stretches. Each one is sent to this phone the moment it finishes, transcribed, and anything that sounds like a commitment or a time shows up under Heard. The next recording starts immediately — the gap is under a second.")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
         }

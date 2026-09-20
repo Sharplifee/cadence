@@ -23,10 +23,29 @@ public final class WatchAmbientRecorder: NSObject, ObservableObject {
     /// How far back a mark reaches.
     public var lookback: TimeInterval = 120
 
+    /// Length of each automatic recording. Five minutes by default; the loop
+    /// closes one file and opens the next with only the gap it takes to do it.
+    public var segmentMinutes: Int {
+        get { UserDefaults.standard.object(forKey: "loopMinutes") as? Int ?? 5 }
+        set { UserDefaults.standard.set(newValue, forKey: "loopMinutes") }
+    }
+
+    /// Every completed segment is sent for transcription, not just marked ones.
+    /// The point is that you never have to decide to capture something.
+    public var autoSendEverySegment: Bool {
+        get { UserDefaults.standard.object(forKey: "loopAutoSend") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "loopAutoSend") }
+    }
+
+    @Published public private(set) var segmentsSent = 0
+    @Published public private(set) var currentSegmentElapsed: TimeInterval = 0
+
     private var buffer = RollingBuffer(window: 600, segmentLength: 30)
     private let sender = ClipSender()
     private var recorder: AVAudioRecorder?
     private var rotateTimer: Timer?
+    private var tickTimer: Timer?
+    private var segmentStartedAt: Date?
     private var startedAt = Date()
 
     private let fm = FileManager.default
@@ -64,10 +83,19 @@ public final class WatchAmbientRecorder: NSObject, ObservableObject {
             startedAt = Date()
             buffer.reset()
             clearLoopDir()
+            buffer = RollingBuffer(window: TimeInterval(segmentMinutes) * 60 * 2,
+                                   segmentLength: TimeInterval(segmentMinutes) * 60)
             try openSegment()
+            segmentStartedAt = Date()
             rotateTimer = Timer.scheduledTimer(withTimeInterval: buffer.segmentLength,
                                                repeats: true) { [weak self] _ in
                 Task { @MainActor in self?.rotate() }
+            }
+            tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, let s = self.segmentStartedAt else { return }
+                    self.currentSegmentElapsed = Date().timeIntervalSince(s)
+                }
             }
             isLooping = true
             lastError = nil
@@ -78,6 +106,10 @@ public final class WatchAmbientRecorder: NSObject, ObservableObject {
 
     public func stopLoop() {
         rotateTimer?.invalidate(); rotateTimer = nil
+        tickTimer?.invalidate(); tickTimer = nil
+        // Send the partial segment rather than throw away what it captured.
+        if autoSendEverySegment { rotate(sendOnly: true) }
+        segmentStartedAt = nil; currentSegmentElapsed = 0
         recorder?.stop(); recorder = nil
         isLooping = false
         bufferedSeconds = 0
@@ -149,25 +181,41 @@ public final class WatchAmbientRecorder: NSObject, ObservableObject {
 
     private var currentFilename = ""
 
-    private func rotate() {
+    /// Close the current file and immediately open the next. The gap is the
+    /// time it takes to do exactly that — no processing happens in between,
+    /// because anything slow here becomes a hole in the recording.
+    private func rotate(sendOnly: Bool = false) {
         guard isLooping || recorder != nil else { return }
         recorder?.stop()
         let closed = currentFilename
         let elapsed = Date().timeIntervalSince(startedAt)
 
+        // Reopen FIRST so the microphone is live again before anything else.
+        if !sendOnly {
+            do { try openSegment(); segmentStartedAt = Date(); currentSegmentElapsed = 0 }
+            catch { lastError = error.localizedDescription; isLooping = false }
+        }
+
         let expired = buffer.rotate(at: elapsed)
-        // Name the segment the buffer just recorded after the real file.
         if var last = buffer.segments.last {
             last.filename = closed
             buffer.replaceLast(with: last)
         }
-        for e in expired {
-            try? fm.removeItem(at: loopDir.appendingPathComponent(e.filename))
-        }
         bufferedSeconds = buffer.coveredDuration
 
-        do { try openSegment() }
-        catch { lastError = error.localizedDescription; isLooping = false }
+        if autoSendEverySegment, !closed.isEmpty {
+            let url = loopDir.appendingPathComponent(closed)
+            if fm.fileExists(atPath: url.path) {
+                sender.sendSegment(url, capturedAt: Date().addingTimeInterval(-buffer.segmentLength))
+                segmentsSent += 1
+            }
+        } else {
+            // Not auto-sending: fall back to the rolling window and delete old
+            // audio so the watch does not fill up.
+            for e in expired {
+                try? fm.removeItem(at: loopDir.appendingPathComponent(e.filename))
+            }
+        }
     }
 
     private func clearLoopDir() {

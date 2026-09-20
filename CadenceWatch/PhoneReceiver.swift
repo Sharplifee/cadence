@@ -88,6 +88,12 @@ public final class PhoneReceiver: NSObject, ObservableObject, WCSessionDelegate 
     }
 
     nonisolated public func session(_ s: WCSession,
+                                    didReceiveApplicationContext context: [String: Any]) {
+        guard let m = context["loopMinutes"] as? Int else { return }
+        Task { @MainActor in UserDefaults.standard.set(m, forKey: "loopMinutes") }
+    }
+
+    nonisolated public func session(_ s: WCSession,
                                     activationDidCompleteWith state: WCSessionActivationState,
                                     error: Error?) {}
 }

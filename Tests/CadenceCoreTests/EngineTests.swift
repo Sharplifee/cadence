@@ -819,3 +819,206 @@ final class ClipLibraryTests: XCTestCase {
         XCTAssertTrue(lib.clips.isEmpty)
     }
 }
+
+final class DatePhraseParserTests: XCTestCase {
+    private var cal: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = DatePhraseParser.timeZone
+        return c
+    }
+    /// Wednesday 2026-09-09, 10:00 Mountain.
+    private var now: Date {
+        var c = DateComponents()
+        c.year = 2026; c.month = 9; c.day = 9; c.hour = 10
+        return cal.date(from: c)!
+    }
+
+    func testTomorrow() {
+        let p = DatePhraseParser.parse("I'll send it tomorrow", now: now)
+        XCTAssertEqual(cal.component(.day, from: p!.date), 10)
+    }
+
+    func testWeekdayGoesForward() {
+        let p = DatePhraseParser.parse("let's do Friday", now: now)
+        XCTAssertEqual(cal.component(.weekday, from: p!.date), 6)
+        XCTAssertGreaterThan(p!.date, now)
+    }
+
+    func testSameWeekdayMeansNextWeekNotFiveMinutesAgo() {
+        // "Wednesday" said on a Wednesday.
+        let p = DatePhraseParser.parse("how about Wednesday", now: now)
+        XCTAssertEqual(cal.component(.day, from: p!.date), 16)
+    }
+
+    func testNextWeekdaySkipsAWeek() {
+        let p = DatePhraseParser.parse("next Friday works", now: now)
+        XCTAssertEqual(cal.component(.day, from: p!.date), 18)
+    }
+
+    func testExplicitClockTime() {
+        let p = DatePhraseParser.parse("tomorrow at 3pm", now: now)
+        XCTAssertEqual(cal.component(.hour, from: p!.date), 15)
+        XCTAssertTrue(p!.hasExplicitTime)
+    }
+
+    func testMinutesParsed() {
+        let p = DatePhraseParser.parse("Friday at 9:30am", now: now)
+        XCTAssertEqual(cal.component(.hour, from: p!.date), 9)
+        XCTAssertEqual(cal.component(.minute, from: p!.date), 30)
+    }
+
+    func testBareNumbersAreNotTimes() {
+        // The single most annoying false positive: every quantity becoming 3pm.
+        XCTAssertNil(DatePhraseParser.parse("we need 3 more boxes", now: now))
+        XCTAssertNil(DatePhraseParser.parse("it cost 40 dollars", now: now))
+    }
+
+    func testNamedTimesAreNotMarkedExplicit() {
+        let p = DatePhraseParser.parse("I'll call first thing", now: now)
+        XCTAssertEqual(cal.component(.hour, from: p!.date), 8)
+        XCTAssertFalse(p!.hasExplicitTime,
+                       "'first thing' is a default hour, not an agreed time")
+    }
+
+    func testEndOfDay() {
+        let p = DatePhraseParser.parse("by end of day Thursday", now: now)
+        XCTAssertEqual(cal.component(.hour, from: p!.date), 17)
+        XCTAssertEqual(cal.component(.weekday, from: p!.date), 5)
+    }
+
+    func testTimeWithNoDayRollsForwardWhenAlreadyPast() {
+        // 8am is past at 10am, so it means tomorrow.
+        let p = DatePhraseParser.parse("call me at 8am", now: now)
+        XCTAssertEqual(cal.component(.day, from: p!.date), 10)
+    }
+
+    func testTimeWithNoDayStaysTodayWhenStillAhead() {
+        let p = DatePhraseParser.parse("call me at 4pm", now: now)
+        XCTAssertEqual(cal.component(.day, from: p!.date), 9)
+        XCTAssertEqual(cal.component(.hour, from: p!.date), 16)
+    }
+
+    func testNothingFoundReturnsNil() {
+        XCTAssertNil(DatePhraseParser.parse("that was a good meal", now: now))
+    }
+
+    func testDayWithNoTimeDefaultsToNineAndSaysSo() {
+        let p = DatePhraseParser.parse("Monday then", now: now)
+        XCTAssertEqual(cal.component(.hour, from: p!.date), 9)
+        XCTAssertFalse(p!.hasExplicitTime)
+    }
+
+    func testMountainTimeNotUTC() {
+        // 6pm Mountain is already tomorrow in UTC; the day must not shift.
+        let p = DatePhraseParser.parse("tomorrow at 6pm", now: now)
+        XCTAssertEqual(cal.component(.day, from: p!.date), 10)
+        XCTAssertEqual(cal.component(.hour, from: p!.date), 18)
+    }
+}
+
+final class ActionQueueTests: XCTestCase {
+    private func item(_ text: String, at: Date = Date()) -> ActionItem {
+        ActionItem(kind: .promise, text: text, capturedAt: at)
+    }
+
+    func testOverlappingLoopsDoNotDoubleUpTheSameSentence() {
+        // A sentence heard at the end of one segment and the start of the next.
+        let now = Date()
+        var q = ActionQueue()
+        q.add([item("I'll send the invoice", at: now)])
+        q.add([item("I'll send the invoice", at: now.addingTimeInterval(300))])
+        XCTAssertEqual(q.items.count, 1)
+    }
+
+    func testTheSameSentenceMuchLaterIsARealSecondCommitment() {
+        let now = Date()
+        var q = ActionQueue()
+        q.add([item("I'll send the invoice", at: now)])
+        q.add([item("I'll send the invoice", at: now.addingTimeInterval(7200))])
+        XCTAssertEqual(q.items.count, 2)
+    }
+
+    func testNothingIsAcceptedByDefault() {
+        var q = ActionQueue()
+        q.add([item("I'll call him")])
+        XCTAssertNil(q.items[0].accepted)
+        XCTAssertEqual(q.undecided.count, 1)
+        XCTAssertTrue(q.readyForCalendar.isEmpty)
+    }
+
+    func testOnlyAcceptedAndDatedItemsReachTheCalendar() {
+        var q = ActionQueue()
+        let dated = ActionItem(kind: .scheduling, text: "Friday at 3",
+                               dueAt: Date().addingTimeInterval(86400))
+        let undated = ActionItem(kind: .promise, text: "I'll think about it")
+        q.add([dated, undated])
+        q.setAccepted(dated.id, true)
+        q.setAccepted(undated.id, true)
+        XCTAssertEqual(q.readyForCalendar.count, 1)
+        XCTAssertEqual(q.readyForCalendar.first?.id, dated.id)
+    }
+
+    func testAnItemCannotBeAddedToTheCalendarTwice() {
+        var q = ActionQueue()
+        let a = ActionItem(kind: .scheduling, text: "Monday",
+                           dueAt: Date().addingTimeInterval(3600))
+        q.add([a])
+        q.setAccepted(a.id, true)
+        q.markOnCalendar(a.id, eventID: "evt-1")
+        XCTAssertTrue(q.readyForCalendar.isEmpty)
+        XCTAssertEqual(q.onCalendar.count, 1)
+    }
+
+    func testDecliningRemovesItFromTheQueueOfDecisions() {
+        var q = ActionQueue()
+        let a = item("I'll do it")
+        q.add([a])
+        q.setAccepted(a.id, false)
+        XCTAssertTrue(q.undecided.isEmpty)
+        XCTAssertTrue(q.readyForCalendar.isEmpty)
+    }
+
+    func testNewestFirst() {
+        let now = Date()
+        var q = ActionQueue()
+        q.add([item("older", at: now.addingTimeInterval(-9000)),
+               item("newer", at: now)])
+        XCTAssertEqual(q.items.first?.text, "newer")
+    }
+}
+
+final class ActionExtractorTests: XCTestCase {
+    func testCommitmentWithADateBecomesSchedulable() {
+        var c = DateComponents(); c.year = 2026; c.month = 9; c.day = 9; c.hour = 10
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = DatePhraseParser.timeZone
+        let now = cal.date(from: c)!
+
+        let items = ActionExtractor.items(
+            from: [Utterance(speaker: .me, start: 0, end: 4,
+                             text: "I'll have the numbers to you Friday at 3pm")],
+            capturedAt: now, now: now)
+        XCTAssertEqual(items.count, 2)  // promise + scheduling
+        XCTAssertTrue(items.allSatisfy { $0.dueAt != nil })
+        XCTAssertTrue(items.contains { $0.hasExplicitTime })
+        XCTAssertTrue(items.allSatisfy { $0.isSchedulable })
+    }
+
+    func testCommitmentWithNoDateIsStillCapturedButNotSchedulable() {
+        let items = ActionExtractor.items(
+            from: [Utterance(speaker: .me, start: 0, end: 3, text: "I'll look into it")],
+            capturedAt: Date())
+        XCTAssertEqual(items.count, 1)
+        XCTAssertNil(items[0].dueAt)
+        XCTAssertFalse(items[0].isSchedulable)
+    }
+
+    func testTitleKeepsTheOriginalWords() {
+        let items = ActionExtractor.items(
+            from: [Utterance(speaker: .them, start: 0, end: 3,
+                             text: "Can you send me the deck")],
+            capturedAt: Date())
+        XCTAssertTrue(items[0].calendarTitle.contains("send me the deck"),
+                      "the raw sentence is how you recognise it later")
+    }
+}

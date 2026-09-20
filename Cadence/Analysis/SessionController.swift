@@ -164,6 +164,12 @@ public final class SessionController: ObservableObject {
 
     // MARK: - Control
 
+    /// Push the loop length to the watch. It is the watch that records, so the
+    /// phone's copy of this setting is only a remote control.
+    public func setLoopMinutes(_ minutes: Int) {
+        watch.sendLoopMinutes(minutes)
+    }
+
     public func applySensitivity(_ value: Double) {
         policy.applySensitivity(Float(value))
     }

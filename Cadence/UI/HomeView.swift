@@ -8,6 +8,8 @@ struct HomeView: View {
         TabView {
             LiveView()
                 .tabItem { Label("Live", systemImage: "waveform") }
+            ReviewView()
+                .tabItem { Label("Heard", systemImage: "checklist") }
             ClipsView()
                 .tabItem { Label("Marks", systemImage: "bookmark") }
             HistoryView()

@@ -10,6 +10,7 @@ import WatchConnectivity
 @MainActor
 public final class ClipReceiver: ObservableObject {
     @Published public private(set) var library = ClipLibrary()
+    @Published public private(set) var queue = ActionQueue()
     @Published public private(set) var processing = false
 
     private let fm = FileManager.default
@@ -20,6 +21,7 @@ public final class ClipReceiver: ObservableObject {
         return d
     }()
     private var indexURL: URL { root.appendingPathComponent("index.json") }
+    private var queueURL: URL { root.appendingPathComponent("queue.json") }
 
     public init() { load() }
 
@@ -94,6 +96,9 @@ public final class ClipReceiver: ObservableObject {
             clip.commitments = CommitmentExtractor.extract(from: utterances)
             clip.stage = .processed
             clip.errorMessage = nil
+            // Everything the loop finds becomes a proposal you can accept or
+            // dismiss. Nothing is written anywhere on its own.
+            queue.add(ActionExtractor.items(from: utterances, capturedAt: clip.markedAt))
         }
         library.upsert(clip)
         save()
@@ -109,6 +114,10 @@ public final class ClipReceiver: ObservableObject {
             .filter { fm.fileExists(atPath: $0.path) }
     }
 
+    public func setAccepted(_ id: UUID, _ value: Bool?) { queue.setAccepted(id, value); save() }
+    public func markOnCalendar(_ id: UUID, eventID: String) { queue.markOnCalendar(id, eventID: eventID); save() }
+    public func removeItem(_ id: UUID) { queue.remove(id); save() }
+
     public func delete(_ id: UUID) {
         try? fm.removeItem(at: root.appendingPathComponent(id.uuidString))
         library.remove(id)
@@ -119,16 +128,20 @@ public final class ClipReceiver: ObservableObject {
 
     private func save() {
         let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
-        guard let data = try? enc.encode(library) else { return }
+        guard let libData = try? enc.encode(library),
+              let queueData = try? enc.encode(queue) else { return }
+        let qURL = queueURL
         DispatchQueue.global(qos: .utility).async { [indexURL] in
-            try? data.write(to: indexURL)
+            try? libData.write(to: indexURL)
+            try? queueData.write(to: qURL)
         }
     }
 
     private func load() {
         let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
-        guard let data = try? Data(contentsOf: indexURL),
-              let lib = try? dec.decode(ClipLibrary.self, from: data) else { return }
-        library = lib
+        if let data = try? Data(contentsOf: indexURL),
+           let lib = try? dec.decode(ClipLibrary.self, from: data) { library = lib }
+        if let data = try? Data(contentsOf: queueURL),
+           let q = try? dec.decode(ActionQueue.self, from: data) { queue = q }
     }
 }

@@ -155,8 +155,11 @@ struct WatchHelpView: View {
 struct WatchLoopView: View {
     @EnvironmentObject var loop: WatchAmbientRecorder
 
-    private var minutes: Int { Int(loop.bufferedSeconds) / 60 }
-    private var seconds: Int { Int(loop.bufferedSeconds) % 60 }
+    private var countdown: String {
+        let total = TimeInterval(loop.segmentMinutes) * 60
+        let left = max(0, total - loop.currentSegmentElapsed)
+        return String(format: "%d:%02d", Int(left) / 60, Int(left) % 60)
+    }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -168,10 +171,10 @@ struct WatchLoopView: View {
                     .font(.system(size: 13, weight: .medium))
             }
 
-            Text(loop.isLooping ? String(format: "%d:%02d", minutes, seconds) : "—")
+            Text(loop.isLooping ? countdown : "—")
                 .font(.system(size: 26, weight: .medium, design: .rounded))
                 .monospacedDigit()
-            Text("held")
+            Text(loop.isLooping ? "until next send" : "\(loop.segmentMinutes) min loops")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
 
             if loop.isLooping {
@@ -190,10 +193,8 @@ struct WatchLoopView: View {
             .font(.system(size: 12))
             .tint(loop.isLooping ? .red : .green)
 
-            if loop.savedClips > 0 {
-                Text("\(loop.savedClips) saved")
-                    .font(.system(size: 9)).foregroundStyle(.secondary)
-            }
+            Text("\(loop.segmentsSent) sent · \(loop.savedClips) marked")
+                .font(.system(size: 9)).foregroundStyle(.secondary)
             if let e = loop.lastError {
                 Text(e).font(.system(size: 9)).foregroundStyle(.orange)
                     .multilineTextAlignment(.center)

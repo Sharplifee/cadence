@@ -39,6 +39,13 @@ public final class WatchBridge: NSObject, WCSessionDelegate {
 
     /// Ring updates are throttled hard — the watch screen is off most of the
     /// time and every wake costs battery for a display nobody is looking at.
+    /// Loop length as application context rather than a message: it must
+    /// survive the watch app being closed and arrive whenever it next wakes.
+    public func sendLoopMinutes(_ minutes: Int) {
+        guard let session, session.activationState == .activated else { return }
+        try? session.updateApplicationContext(["loopMinutes": minutes])
+    }
+
     public func sendStrain(_ strain: Double) {
         guard Date().timeIntervalSince(lastStrainSend) > 4 else { return }
         lastStrainSend = Date()
