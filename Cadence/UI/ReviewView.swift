@@ -74,7 +74,7 @@ struct ReviewView: View {
                     Text(gaps.isEmpty
                          ? "Nothing was missed — the watch covered every stretch the phone lost."
                          : "\(gaps.count) stretch\(gaps.count == 1 ? "" : "es") where neither device was recording.")
-                        .font(.caption2).foregroundStyle(gaps.isEmpty ? .tertiary : Ink.drifting)
+                        .font(.caption2).foregroundStyle(gaps.isEmpty ? Color.white.opacity(0.4) : Ink.drifting)
                 }
             }
         }
