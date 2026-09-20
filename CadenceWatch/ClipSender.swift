@@ -18,7 +18,7 @@ public final class ClipSender: NSObject, ObservableObject {
     /// Ship one completed loop segment. Unlike a mark this happens without the
     /// user doing anything, so it must never block the recorder — transferFile
     /// queues on disk and returns immediately.
-    public func sendSegment(_ url: URL, capturedAt: Date) {
+    public func sendSegment(_ url: URL, capturedAt: Date, length: TimeInterval) {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         let meta: [String: Any] = [
@@ -28,7 +28,10 @@ public final class ClipSender: NSObject, ObservableObject {
             "note": "",
             "index": 0,
             "total": 1,
-            "auto": true
+            "auto": true,
+            // The phone needs the real length to know exactly what this
+            // covered, or the merger cannot tell where the holes are.
+            "length": length
         ]
         session.transferFile(url, metadata: meta)
         queued = session.outstandingFileTransfers.count

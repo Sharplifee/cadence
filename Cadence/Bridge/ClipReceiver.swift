@@ -12,6 +12,10 @@ public final class ClipReceiver: ObservableObject {
     @Published public private(set) var library = ClipLibrary()
     @Published public private(set) var queue = ActionQueue()
     @Published public private(set) var processing = false
+    /// Every stretch either device managed to record, phone and watch alike.
+    @Published public private(set) var runs: [CaptureRun] = []
+    /// The resolved timeline: phone audio where it exists, watch elsewhere.
+    @Published public private(set) var coverage: [CoverageSpan] = []
 
     private let fm = FileManager.default
     private lazy var root: URL = {
@@ -55,8 +59,36 @@ public final class ClipReceiver: ObservableObject {
         library.upsert(clip)
         save()
 
+        // Register what the watch covered, so the merger can prefer phone
+        // audio for the same minutes and fall back to this where it cannot.
+        if let auto = metadata["auto"] as? Bool, auto {
+            let start = clip.markedAt
+            let length = metadata["length"] as? TimeInterval
+                ?? TimeInterval((UserDefaults.standard.object(forKey: "loopMinutes") as? Int ?? 5) * 60)
+            addRun(CaptureRun(source: .watch, start: start,
+                              end: start.addingTimeInterval(length),
+                              filename: dest.lastPathComponent))
+        }
+
         if clip.stage == .arrived { Task { await process(clip.id) } }
     }
+
+    public func addRun(_ run: CaptureRun) {
+        guard !runs.contains(where: { $0.filename == run.filename }) else { return }
+        runs.append(run)
+        runs.sort { $0.start < $1.start }
+        recomputeCoverage()
+    }
+
+    public func addRuns(_ new: [CaptureRun]) { new.forEach(addRun) }
+
+    private func recomputeCoverage() {
+        coverage = CaptureMerger.plan(runs: runs)
+    }
+
+    /// How much of the recorded time came from the better microphone. If this
+    /// stays low the phone loop is not earning the battery it costs.
+    public var phoneShare: Double { CaptureMerger.phoneShare(of: coverage) }
 
     // MARK: - Processing
 

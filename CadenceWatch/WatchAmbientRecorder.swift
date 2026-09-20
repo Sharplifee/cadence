@@ -206,7 +206,9 @@ public final class WatchAmbientRecorder: NSObject, ObservableObject {
         if autoSendEverySegment, !closed.isEmpty {
             let url = loopDir.appendingPathComponent(closed)
             if fm.fileExists(atPath: url.path) {
-                sender.sendSegment(url, capturedAt: Date().addingTimeInterval(-buffer.segmentLength))
+                sender.sendSegment(url,
+                                   capturedAt: Date().addingTimeInterval(-buffer.segmentLength),
+                                   length: buffer.segmentLength)
                 segmentsSent += 1
             }
         } else {

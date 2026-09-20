@@ -25,6 +25,7 @@ struct ReviewView: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 12) {
+                            coverageCard
                             ForEach(clips.queue.items) { item in row(item) }
                         }
                         .padding(20)
@@ -41,6 +42,41 @@ struct ReviewView: View {
             }
             .navigationTitle("Heard")
             .task { _ = await writer.requestAccess() }
+        }
+    }
+
+    /// Says plainly which device heard what, and where nothing was recording.
+    @ViewBuilder private var coverageCard: some View {
+        if !clips.coverage.isEmpty {
+            let gaps = CaptureMerger.gaps(in: clips.coverage)
+            Card {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Coverage").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(Int(clips.phoneShare * 100))% phone")
+                            .font(.caption2).foregroundStyle(Ink.matched)
+                    }
+                    GeometryReader { geo in
+                        let total = clips.coverage.reduce(0.0) { $0 + $1.duration }
+                        HStack(spacing: 1) {
+                            ForEach(clips.coverage) { span in
+                                Rectangle()
+                                    .fill(span.isGap ? Color.white.opacity(0.08)
+                                          : (span.source == .phone ? Ink.matched : Ink.them))
+                                    .frame(width: total > 0
+                                           ? max(1, geo.size.width * span.duration / total) : 0)
+                            }
+                        }
+                    }
+                    .frame(height: 8)
+                    .clipShape(Capsule())
+                    Text(gaps.isEmpty
+                         ? "Nothing was missed — the watch covered every stretch the phone lost."
+                         : "\(gaps.count) stretch\(gaps.count == 1 ? "" : "es") where neither device was recording.")
+                        .font(.caption2).foregroundStyle(gaps.isEmpty ? .tertiary : Ink.drifting)
+                }
+            }
         }
     }
 

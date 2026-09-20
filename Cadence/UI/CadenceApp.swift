@@ -5,6 +5,7 @@ import SwiftUI
 struct CadenceApp: App {
     @StateObject private var controller = SessionController()
     @StateObject private var clips = ClipReceiver()
+    @StateObject private var phoneLoop = PhoneLoopRecorder()
     @AppStorage("hasEnrolled") private var hasEnrolled = false
 
     var body: some Scene {
@@ -20,7 +21,18 @@ struct CadenceApp: App {
             }
             .environmentObject(controller)
             .environmentObject(clips)
-            .task { WatchFileBridge.shared.receiver = clips }
+            .environmentObject(phoneLoop)
+            .task {
+                WatchFileBridge.shared.receiver = clips
+                // Dual capture: the phone records whenever it can get the mic
+                // and the watch covers everything it cannot.
+                if UserDefaults.standard.object(forKey: "dualCapture") as? Bool ?? true {
+                    phoneLoop.start()
+                }
+            }
+            .onChange(of: phoneLoop.runs.count) { _, _ in
+                clips.addRuns(phoneLoop.runs)
+            }
             .preferredColorScheme(.dark)
             .tint(Ink.matched)
         }

@@ -1022,3 +1022,98 @@ final class ActionExtractorTests: XCTestCase {
                       "the raw sentence is how you recognise it later")
     }
 }
+
+final class CaptureMergerTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    private func at(_ s: TimeInterval) -> Date { t0.addingTimeInterval(s) }
+    private func run(_ src: CaptureSource, _ a: TimeInterval, _ b: TimeInterval,
+                     _ name: String) -> CaptureRun {
+        CaptureRun(source: src, start: at(a), end: at(b), filename: name)
+    }
+
+    func testPhoneWinsWhereBothRecorded() {
+        let plan = CaptureMerger.plan(runs: [
+            run(.watch, 0, 300, "w1"),
+            run(.phone, 0, 300, "p1")
+        ])
+        XCTAssertEqual(plan.count, 1)
+        XCTAssertEqual(plan[0].source, .phone)
+        XCTAssertEqual(plan[0].filename, "p1")
+    }
+
+    func testWatchFillsThePhoneHole() {
+        // The phone lost the mic to a call from 100s to 200s.
+        let plan = CaptureMerger.plan(runs: [
+            run(.watch, 0, 300, "w1"),
+            run(.phone, 0, 100, "p1"),
+            run(.phone, 200, 300, "p2")
+        ])
+        XCTAssertEqual(plan.map(\.source), [.phone, .watch, .phone])
+        XCTAssertEqual(plan[1].filename, "w1")
+        XCTAssertEqual(plan[1].duration, 100, accuracy: 0.01)
+        XCTAssertTrue(CaptureMerger.gaps(in: plan).isEmpty,
+                      "the watch is there precisely so this is not a gap")
+    }
+
+    func testARealGapIsReportedWhenNeitherWasRecording() {
+        let plan = CaptureMerger.plan(runs: [
+            run(.phone, 0, 100, "p1"),
+            run(.phone, 200, 300, "p2")
+        ])
+        let gaps = CaptureMerger.gaps(in: plan)
+        XCTAssertEqual(gaps.count, 1)
+        XCTAssertEqual(gaps[0].duration, 100, accuracy: 0.01)
+    }
+
+    func testClockSkewSliversAreDiscarded() {
+        // Watch clock a half-second off — skew, not content.
+        let plan = CaptureMerger.plan(runs: [
+            run(.phone, 0, 100, "p1"),
+            run(.watch, 100, 100.5, "w1"),
+            run(.phone, 100.5, 200, "p2")
+        ])
+        XCTAssertFalse(plan.contains { $0.source == .watch })
+    }
+
+    func testAdjacentSpansFromOneFileCollapse() {
+        let plan = CaptureMerger.plan(runs: [
+            run(.phone, 0, 300, "p1"),
+            run(.watch, 50, 60, "w1")
+        ])
+        XCTAssertEqual(plan.count, 1, "the watch never surfaces under phone audio")
+        XCTAssertEqual(plan[0].duration, 300, accuracy: 0.01)
+    }
+
+    func testWatchOnlyStillProducesAFullPlan() {
+        let plan = CaptureMerger.plan(runs: [run(.watch, 0, 300, "w1")])
+        XCTAssertEqual(plan.count, 1)
+        XCTAssertEqual(plan[0].source, .watch)
+    }
+
+    func testPhoneShareTellsYouWhetherThePhoneLoopIsEarningItsBattery() {
+        let good = CaptureMerger.plan(runs: [
+            run(.watch, 0, 300, "w1"), run(.phone, 0, 300, "p1")])
+        XCTAssertEqual(CaptureMerger.phoneShare(of: good), 1.0, accuracy: 0.01)
+
+        let poor = CaptureMerger.plan(runs: [
+            run(.watch, 0, 300, "w1"), run(.phone, 0, 30, "p1")])
+        XCTAssertEqual(CaptureMerger.phoneShare(of: poor), 0.1, accuracy: 0.02)
+    }
+
+    func testEmptyInput() {
+        XCTAssertTrue(CaptureMerger.plan(runs: []).isEmpty)
+    }
+
+    func testPlanIsContiguousAndOrdered() {
+        let plan = CaptureMerger.plan(runs: [
+            run(.watch, 0, 300, "w1"),
+            run(.phone, 60, 120, "p1"),
+            run(.phone, 180, 240, "p2")
+        ])
+        for i in 1..<plan.count {
+            XCTAssertEqual(plan[i-1].end, plan[i].start,
+                           "the plan must leave no unexplained instants")
+        }
+        XCTAssertEqual(plan.map(\.source), [.watch, .phone, .watch, .phone, .watch])
+    }
+}

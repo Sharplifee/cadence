@@ -6,10 +6,13 @@ import SwiftUI
 /// company are completely different social risks and only you can price them.
 struct SettingsView: View {
     @EnvironmentObject var controller: SessionController
+    @EnvironmentObject var phoneLoop: PhoneLoopRecorder
+    @EnvironmentObject var clips: ClipReceiver
     @AppStorage("sensitivity") private var sensitivity: Double = 0.5
     @AppStorage("syncEnabled") private var syncEnabled = false
     @AppStorage("hasEnrolled") private var hasEnrolled = true
     @AppStorage("loopMinutes") private var loopMinutes = 5
+    @AppStorage("dualCapture") private var dualCapture = true
 
     var body: some View {
         NavigationStack {
@@ -23,6 +26,7 @@ struct SettingsView: View {
                         escalationCard
                         previewCard
                         loopCard
+                        captureCard
                         privacyCard
                         profileCard
                     }
@@ -155,6 +159,35 @@ struct SettingsView: View {
                 .onChange(of: loopMinutes) { _, v in controller.setLoopMinutes(v) }
                 Text("Your watch records in \(loopMinutes)-minute stretches. Each one is sent to this phone the moment it finishes, transcribed, and anything that sounds like a commitment or a time shows up under Heard. The next recording starts immediately — the gap is under a second.")
                     .font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    /// Dual capture is the default because the phone alone loses the mic to
+    /// everything and the watch alone has a worse microphone.
+    private var captureCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Also record on this phone", isOn: $dualCapture)
+                    .font(.subheadline)
+                    .onChange(of: dualCapture) { _, on in
+                        on ? phoneLoop.start() : phoneLoop.stop()
+                    }
+                Text("Your watch records the whole time. This phone records too whenever it can get the microphone, and its audio is used instead because it sounds better. Calls, voice memos and other recorders take the mic away — the watch covers those stretches.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                HStack {
+                    Circle()
+                        .fill(phoneLoop.isRecording ? Ink.matched : Ink.drifting)
+                        .frame(width: 7, height: 7)
+                    Text(phoneLoop.isRecording ? "Phone recording"
+                         : (phoneLoop.lastMessage ?? "Phone idle"))
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Spacer()
+                    if !clips.coverage.isEmpty {
+                        Text("\(Int(clips.phoneShare * 100))% from phone")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
             }
         }
     }
