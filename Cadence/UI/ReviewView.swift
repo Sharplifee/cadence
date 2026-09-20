@@ -130,7 +130,9 @@ struct ReviewView: View {
     private func addAll() async {
         working = true
         defer { working = false }
-        guard writer.isAuthorized || await writer.requestAccess() else {
+        var authorized = writer.isAuthorized
+        if !authorized { authorized = await writer.requestAccess() }
+        guard authorized else {
             status = "Calendar access is off. Turn it on in iOS Settings, Self Attune."
             return
         }
