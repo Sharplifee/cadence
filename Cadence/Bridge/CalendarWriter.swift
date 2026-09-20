@@ -46,7 +46,7 @@ public final class CalendarWriter {
         event.notes = """
         \(item.text)
 
-        Heard \(item.capturedAt.formatted(date: .abbreviated, time: .shortened)) by Self Attune.
+        Heard \(item.capturedAt.formatted(date: .abbreviated, time: .shortened)) by Looped.
         \(item.dateEvidence.map { "Date from: \($0)" } ?? "")
         """
         // A time nobody actually agreed gets no alarm — it would fire at a

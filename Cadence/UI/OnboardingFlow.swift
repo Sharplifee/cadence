@@ -34,7 +34,7 @@ private struct WelcomeStep: View {
         VStack(spacing: 22) {
             Image(systemName: "waveform.circle")
                 .font(.system(size: 72)).foregroundStyle(Ink.matched)
-            Text("Self Attune").font(.largeTitle.weight(.semibold))
+            Text("Looped").font(.largeTitle.weight(.semibold))
             Text("It listens, works out how fast and loud the other person is, and taps your wrist when you have run ahead of them. Afterwards you get the transcript and what to work on. Nobody else in the room knows.")
                 .font(.callout).multilineTextAlignment(.center)
                 .foregroundStyle(.secondary).padding(.horizontal, 34)

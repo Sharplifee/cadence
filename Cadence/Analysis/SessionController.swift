@@ -244,7 +244,7 @@ public final class SessionController: ObservableObject {
     private func start(coaching: Bool) throws {
         guard AVAudioApplication.shared.recordPermission == .granted else {
             throw NSError(domain: "Cadence", code: 3, userInfo: [
-                NSLocalizedDescriptionKey: "Microphone access is off. Turn it on in iOS Settings, Self Attune, Microphone."
+                NSLocalizedDescriptionKey: "Microphone access is off. Turn it on in iOS Settings, Looped, Microphone."
             ])
         }
         if coaching {

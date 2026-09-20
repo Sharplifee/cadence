@@ -18,7 +18,7 @@
   <key>CFBundleName</key>
   <string>$(PRODUCT_NAME)</string>
   <key>CFBundleDisplayName</key>
-  <string>Self Attune</string>
+  <string>Looped</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -38,8 +38,8 @@
   <array><string>workout-processing</string></array>
 
   <key>NSHealthShareUsageDescription</key>
-  <string>Self Attune keeps a mindfulness session running so it can coach you for a whole conversation without being suspended.</string>
+  <string>Looped keeps a mindfulness session running so it can coach you for a whole conversation without being suspended.</string>
   <key>NSHealthUpdateUsageDescription</key>
-  <string>Self Attune keeps a mindfulness session running so it can coach you for a whole conversation without being suspended.</string>
+  <string>Looped keeps a mindfulness session running so it can coach you for a whole conversation without being suspended.</string>
 </dict>
 </plist>

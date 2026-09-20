@@ -34,7 +34,7 @@ struct LiveView: View {
                     .padding(20)
                 }
             }
-            .navigationTitle("Self Attune")
+            .navigationTitle("Looped")
             .navigationBarTitleDisplayMode(.inline)
         }
     }

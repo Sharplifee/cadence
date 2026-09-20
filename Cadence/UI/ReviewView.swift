@@ -169,7 +169,7 @@ struct ReviewView: View {
         var authorized = writer.isAuthorized
         if !authorized { authorized = await writer.requestAccess() }
         guard authorized else {
-            status = "Calendar access is off. Turn it on in iOS Settings, Self Attune."
+            status = "Calendar access is off. Turn it on in iOS Settings, Looped."
             return
         }
         var added = 0
