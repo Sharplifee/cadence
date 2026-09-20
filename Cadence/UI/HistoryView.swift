@@ -242,6 +242,43 @@ struct SessionDetailView: View {
         playing = true
     }
 
+    /// What was actually agreed. This is the part you came back for.
+    private var commitmentsSection: some View {
+        let items = CommitmentExtractor.extract(from: summary.utterances)
+        return VStack(spacing: 10) {
+            if items.isEmpty {
+                Card {
+                    Text("Nothing was promised, offered or asked for in this conversation.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+            ForEach(items) { c in
+                Card {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(c.kind.label.uppercased())
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(color(for: c.kind))
+                            Spacer()
+                            Text(timeString(c.at))
+                                .font(.caption2).foregroundStyle(.tertiary)
+                        }
+                        Text(c.text).font(.subheadline)
+                    }
+                }
+            }
+        }
+    }
+
+    private func color(for k: Commitment.Kind) -> Color {
+        switch k {
+        case .promise:    return Ink.runaway
+        case .offer:      return Ink.drifting
+        case .request:    return Ink.them
+        case .scheduling: return Ink.matched
+        }
+    }
+
     private var findingsSection: some View {
         VStack(spacing: 12) {
             if let ins = summary.insights {

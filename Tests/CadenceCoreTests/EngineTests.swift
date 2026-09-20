@@ -613,3 +613,113 @@ final class AudioRouteKindTests: XCTestCase {
         }
     }
 }
+
+final class RollingBufferTests: XCTestCase {
+    func testKeepsOnlyTheWindow() {
+        var b = RollingBuffer(window: 120, segmentLength: 30)
+        var expiredTotal = 0
+        for i in 1...20 { expiredTotal += b.rotate(at: Double(i) * 30).count }
+        XCTAssertLessThanOrEqual(b.coveredDuration, 120)
+        XCTAssertGreaterThan(expiredTotal, 0, "old segments must be handed back for deletion")
+    }
+
+    func testExpiredSegmentsAreReturnedExactlyOnce() {
+        var b = RollingBuffer(window: 60, segmentLength: 30)
+        var seen: [Int] = []
+        for i in 1...10 { seen += b.rotate(at: Double(i) * 30).map(\.index) }
+        XCTAssertEqual(seen, Array(seen).sorted())
+        XCTAssertEqual(Set(seen).count, seen.count, "a segment must not expire twice")
+    }
+
+    func testMarkCoversTheLookbackWindow() {
+        var b = RollingBuffer(window: 600, segmentLength: 30)
+        for i in 1...20 { b.rotate(at: Double(i) * 30) }
+        let covering = b.segments(coveringLast: 120, endingAt: 600)
+        XCTAssertFalse(covering.isEmpty)
+        XCTAssertLessThanOrEqual(covering.count, 5)
+        XCTAssertTrue(covering.allSatisfy { $0.end > 480 })
+    }
+
+    func testWindowNeverShorterThanASegment() {
+        let b = RollingBuffer(window: 5, segmentLength: 30)
+        XCTAssertEqual(b.window, 30)
+    }
+
+    func testResetClears() {
+        var b = RollingBuffer(window: 120, segmentLength: 30)
+        for i in 1...5 { b.rotate(at: Double(i) * 30) }
+        b.reset()
+        XCTAssertTrue(b.segments.isEmpty)
+        XCTAssertEqual(b.coveredDuration, 0)
+    }
+}
+
+final class CommitmentExtractorTests: XCTestCase {
+    private func u(_ s: Speaker, _ t: Double, _ text: String) -> Utterance {
+        Utterance(speaker: s, start: t, end: t + 3, text: text)
+    }
+
+    func testCatchesYourPromises() {
+        let c = CommitmentExtractor.extract(from: [
+            u(.me, 10, "I'll send you the numbers tonight")])
+        XCTAssertTrue(c.contains { $0.kind == .promise })
+    }
+
+    func testSpeakerDecidesWhatAPhraseMeans() {
+        // The same words are your problem only when they say them.
+        let theirs = CommitmentExtractor.extract(from: [
+            u(.them, 5, "Can you send me the invoice")])
+        XCTAssertEqual(theirs.first?.kind, .request)
+
+        let mine = CommitmentExtractor.extract(from: [
+            u(.me, 5, "Can you send me the invoice")])
+        XCTAssertFalse(mine.contains { $0.kind == .request },
+                       "asking them for something is not a request of you")
+    }
+
+    func testCatchesOffers() {
+        let c = CommitmentExtractor.extract(from: [
+            u(.me, 20, "Want me to take a look at it first")])
+        XCTAssertEqual(c.first?.kind, .offer)
+    }
+
+    func testSchedulingOnlyCountsAlongsideACommitment() {
+        let bare = CommitmentExtractor.extract(from: [
+            u(.me, 5, "Tuesday was pretty rough honestly")])
+        XCTAssertTrue(bare.isEmpty, "a bare day name is not a task")
+
+        let real = CommitmentExtractor.extract(from: [
+            u(.me, 5, "I'll have it to you by Friday")])
+        XCTAssertTrue(real.contains { $0.kind == .scheduling })
+    }
+
+    func testOrdinaryTalkProducesNothing() {
+        let c = CommitmentExtractor.extract(from: [
+            u(.me, 1, "that restaurant was really good"),
+            u(.them, 5, "yeah the place on the corner")])
+        XCTAssertTrue(c.isEmpty)
+    }
+
+    func testEveryCommitmentKeepsItsTimestampForPlayback() {
+        let c = CommitmentExtractor.extract(from: [
+            u(.me, 142, "I'll call him first thing tomorrow")])
+        XCTAssertEqual(c.first?.at, 142)
+    }
+}
+
+final class RollingBufferRenameTests: XCTestCase {
+    func testLastSegmentCanBeRenamedToTheRealFile() {
+        var b = RollingBuffer(window: 120, segmentLength: 30)
+        b.rotate(at: 30)
+        var last = b.segments.last!
+        last.filename = "seg-real-abcd.m4a"
+        b.replaceLast(with: last)
+        XCTAssertEqual(b.segments.last?.filename, "seg-real-abcd.m4a")
+    }
+
+    func testRenameOnEmptyBufferIsSafe() {
+        var b = RollingBuffer()
+        b.replaceLast(with: .init(index: 0, start: 0, duration: 1, filename: "x"))
+        XCTAssertTrue(b.segments.isEmpty)
+    }
+}

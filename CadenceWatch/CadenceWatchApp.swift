@@ -4,10 +4,12 @@ import SwiftUI
 @main
 struct CadenceWatchApp: App {
     @StateObject private var receiver = PhoneReceiver()
+    @StateObject private var loop = WatchAmbientRecorder()
     var body: some Scene {
         WindowGroup {
             WatchRootView()
                 .environmentObject(receiver)
+                .environmentObject(loop)
                 .task { await receiver.runtime.requestAuthorization() }
         }
     }
@@ -21,6 +23,7 @@ struct WatchRootView: View {
     var body: some View {
         ZStack {
             TabView {
+                WatchLoopView()
                 WatchLiveView()
                 WatchLegendView()
                 WatchHelpView()
@@ -143,5 +146,59 @@ struct WatchHelpView: View {
             }
             .padding(.horizontal, 4)
         }
+    }
+}
+
+/// The always-on loop. It lives on the wrist because the Watch has its own
+/// audio session — the phone stays free for voice memos, calls and every other
+/// audio app without either one fighting the other.
+struct WatchLoopView: View {
+    @EnvironmentObject var loop: WatchAmbientRecorder
+
+    private var minutes: Int { Int(loop.bufferedSeconds) / 60 }
+    private var seconds: Int { Int(loop.bufferedSeconds) % 60 }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(loop.isLooping ? .green : .gray)
+                    .frame(width: 7, height: 7)
+                Text(loop.isLooping ? "Looping" : "Loop off")
+                    .font(.system(size: 13, weight: .medium))
+            }
+
+            Text(loop.isLooping ? String(format: "%d:%02d", minutes, seconds) : "—")
+                .font(.system(size: 26, weight: .medium, design: .rounded))
+                .monospacedDigit()
+            Text("held")
+                .font(.system(size: 9)).foregroundStyle(.secondary)
+
+            if loop.isLooping {
+                Button {
+                    _ = loop.markMoment()
+                } label: {
+                    Label("Mark", systemImage: "bookmark.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .tint(.blue)
+            }
+
+            Button(loop.isLooping ? "Stop" : "Start loop") {
+                loop.isLooping ? loop.stopLoop() : loop.startLoop()
+            }
+            .font(.system(size: 12))
+            .tint(loop.isLooping ? .red : .green)
+
+            if loop.savedClips > 0 {
+                Text("\(loop.savedClips) saved")
+                    .font(.system(size: 9)).foregroundStyle(.secondary)
+            }
+            if let e = loop.lastError {
+                Text(e).font(.system(size: 9)).foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding(.horizontal, 4)
     }
 }
