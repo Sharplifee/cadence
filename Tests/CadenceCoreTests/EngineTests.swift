@@ -1117,3 +1117,46 @@ final class CaptureMergerTests: XCTestCase {
         XCTAssertEqual(plan.map(\.source), [.watch, .phone, .watch, .phone, .watch])
     }
 }
+
+final class AudioPolicyTests: XCTestCase {
+    func testBluetoothPlaybackBlocksPhoneRecording() {
+        let d = AudioPolicy.decide(enabled: true, route: .bluetooth, otherAudioPlaying: true)
+        XCTAssertFalse(d.shouldRecord)
+        XCTAssertTrue(d.reason!.contains("AirPods"))
+    }
+
+    func testCarPlayPlaybackBlocksPhoneRecording() {
+        XCTAssertFalse(AudioPolicy.decide(enabled: true, route: .external,
+                                          otherAudioPlaying: true).shouldRecord)
+    }
+
+    func testIdleBluetoothIsFine() {
+        // Nothing playing means nothing to degrade.
+        XCTAssertTrue(AudioPolicy.decide(enabled: true, route: .bluetooth,
+                                         otherAudioPlaying: false).shouldRecord)
+    }
+
+    func testSpeakerPlaybackIsFine() {
+        XCTAssertTrue(AudioPolicy.decide(enabled: true, route: .speaker,
+                                         otherAudioPlaying: true).shouldRecord)
+    }
+
+    func testWiredHeadphonesKeepFullQuality() {
+        XCTAssertTrue(AudioPolicy.decide(enabled: true, route: .headphones,
+                                         otherAudioPlaying: true).shouldRecord)
+    }
+
+    func testDisabledAlwaysDefersWithAReason() {
+        let d = AudioPolicy.decide(enabled: false, route: .speaker, otherAudioPlaying: false)
+        XCTAssertFalse(d.shouldRecord)
+        XCTAssertNotNil(d.reason)
+    }
+
+    func testOnlyLossyWirelessRoutesAreFlagged() {
+        XCTAssertTrue(AudioPolicy.degradesPlayback(.bluetooth))
+        XCTAssertTrue(AudioPolicy.degradesPlayback(.external))
+        XCTAssertFalse(AudioPolicy.degradesPlayback(.speaker))
+        XCTAssertFalse(AudioPolicy.degradesPlayback(.headphones))
+        XCTAssertFalse(AudioPolicy.degradesPlayback(.receiver))
+    }
+}

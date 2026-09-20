@@ -25,6 +25,20 @@ public final class PhoneLoopRecorder: NSObject, ObservableObject {
     }
 
     private let session = AVAudioSession.sharedInstance()
+
+    /// Where playback is currently going. Read without activating anything.
+    private var routeKind: AudioRouteKind {
+        switch session.currentRoute.outputs.first?.portType {
+        case .some(.builtInSpeaker):               return .speaker
+        case .some(.builtInReceiver):              return .receiver
+        case .some(.headphones), .some(.usbAudio): return .headphones
+        case .some(.bluetoothA2DP), .some(.bluetoothLE), .some(.bluetoothHFP):
+                                                   return .bluetooth
+        case .some(.carAudio), .some(.airPlay), .some(.HDMI):
+                                                   return .external
+        default:                                   return .speaker
+        }
+    }
     private var recorder: AVAudioRecorder?
     private var rotateTimer: Timer?
     private var retryTimer: Timer?
@@ -47,6 +61,8 @@ public final class PhoneLoopRecorder: NSObject, ObservableObject {
                        name: AVAudioSession.interruptionNotification, object: session)
         nc.addObserver(self, selector: #selector(foregrounded),
                        name: UIApplication.didBecomeActiveNotification, object: nil)
+        nc.addObserver(self, selector: #selector(routeChanged),
+                       name: AVAudioSession.routeChangeNotification, object: session)
     }
 
     // MARK: - Control
@@ -77,11 +93,27 @@ public final class PhoneLoopRecorder: NSObject, ObservableObject {
 
     private func attemptStart() {
         guard wantsRecording, !isRecording else { return }
+        // Do not touch the audio session at all if recording would wreck what
+        // is playing. Merely activating a session re-evaluates the route.
+        let decision = AudioPolicy.decide(enabled: wantsRecording,
+                                          route: routeKind,
+                                          otherAudioPlaying: session.isOtherAudioPlaying)
+        guard decision.shouldRecord else {
+            isRecording = false
+            lastMessage = decision.reason
+            return
+        }
         do {
-            // .mixWithOthers so the loop never stops your music or a video, and
-            // .measurement for the same reason the coaching path uses it.
-            try session.setCategory(.playAndRecord, mode: .measurement,
-                                    options: [.mixWithOthers, .allowBluetooth, .defaultToSpeaker])
+            // Every option here was wrong before, and each one on its own was
+            // enough to ruin playback:
+            //
+            // .playAndRecord enabled duplex routes, which pushes Bluetooth to
+            //   HFP. .record needs no output at all, so it asks for less.
+            // .allowBluetooth IS the HFP switch. It is never set.
+            // .defaultToSpeaker forcibly overrode the output route — on
+            //   CarPlay or headphones that is simply destructive.
+            // .measurement strips processing from output as well as input.
+            try session.setCategory(.record, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
             try openFile()
             rotateTimer?.invalidate()
@@ -166,6 +198,27 @@ public final class PhoneLoopRecorder: NSObject, ObservableObject {
                 // foreground hook are what actually recover it.
                 self.attemptStart()
             @unknown default: break
+            }
+        }
+    }
+
+    /// Plugging into CarPlay or connecting AirPods mid-loop must stop the phone
+    /// recording immediately, not at the next five-minute boundary — otherwise
+    /// the first thing you hear after connecting is degraded audio.
+    @objc private func routeChanged(_ note: Notification) {
+        Task { @MainActor in
+            let decision = AudioPolicy.decide(enabled: self.wantsRecording,
+                                              route: self.routeKind,
+                                              otherAudioPlaying: self.session.isOtherAudioPlaying)
+            if self.isRecording, !decision.shouldRecord {
+                self.recorder?.stop()
+                self.closeCurrentRun()
+                self.rotateTimer?.invalidate(); self.rotateTimer = nil
+                self.isRecording = false
+                try? self.session.setActive(false, options: [.notifyOthersOnDeactivation])
+                self.lastMessage = decision.reason
+            } else if !self.isRecording, decision.shouldRecord {
+                self.attemptStart()
             }
         }
     }

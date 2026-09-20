@@ -24,9 +24,12 @@ struct CadenceApp: App {
             .environmentObject(phoneLoop)
             .task {
                 WatchFileBridge.shared.receiver = clips
-                // Dual capture: the phone records whenever it can get the mic
-                // and the watch covers everything it cannot.
-                if UserDefaults.standard.object(forKey: "dualCapture") as? Bool ?? true {
+                // Opening the app must not touch AVAudioSession. Activating a
+                // session re-evaluates the Bluetooth route, which is audible
+                // as a glitch and a quality drop in whatever is playing.
+                // Phone recording starts only when you ask for it, and only
+                // when it would not degrade playback.
+                if UserDefaults.standard.bool(forKey: "dualCapture") {
                     phoneLoop.start()
                 }
             }

@@ -75,9 +75,11 @@ public final class WatchAmbientRecorder: NSObject, ObservableObject {
         guard !isLooping else { return }
         do {
             let s = AVAudioSession.sharedInstance()
-            // .mixWithOthers so the loop never stops anything else the Watch is
-            // playing, and never gets stopped by it.
-            try s.setCategory(.playAndRecord, mode: .default,
+            // .record, not .playAndRecord: the loop only captures, so asking
+            // for a duplex route would push Bluetooth to HFP for nothing.
+            // .mixWithOthers so it never stops anything else, and never gets
+            // stopped by it.
+            try s.setCategory(.record, mode: .default,
                               options: [.mixWithOthers, .overrideMutedMicrophoneInterruption])
             try s.setActive(true)
             startedAt = Date()

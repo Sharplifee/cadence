@@ -66,17 +66,23 @@ public final class AudioCapture {
     private func startEngine() throws {
         guard !isCapturing else { return }
 
-        // .mixWithOthers is the whole reason music keeps playing.
-        // .allowBluetooth lets AirPods act as the near-field mic when present.
+        // Coaching needs output as well as input, for the cue tones, so this
+        // is the one place .playAndRecord is justified. Everything else that
+        // used to be here was actively harmful:
         //
-        // .measurement is load-bearing, not incidental: it disables automatic
-        // gain control. With AGC on, iOS normalises the two voices toward each
-        // other, which erases the loudness difference the speaker gate and the
-        // volume cue both depend on. Do not "fix" this to .default — it makes
-        // alert tones louder and the app wrong.
+        // .allowBluetooth is the HFP switch — it is the reason playback
+        //   collapsed to call quality. Never set.
+        // .defaultToSpeaker forcibly overrode the route, which is destructive
+        //   on CarPlay and headphones.
+        // .measurement strips processing from OUTPUT as well as input.
+        //
+        // .allowBluetoothA2DP keeps the good output profile available. Note
+        // that while input is live, Bluetooth still drops to HFP — that is a
+        // Bluetooth constraint, not a setting. It is why the loop lives on the
+        // watch and why the phone defers whenever playback would suffer.
         try session.setCategory(.playAndRecord,
-                                mode: .measurement,
-                                options: [.mixWithOthers, .allowBluetooth, .defaultToSpeaker])
+                                mode: .default,
+                                options: [.mixWithOthers, .allowBluetoothA2DP])
         try session.setPreferredSampleRate(Self.sampleRate)
         try session.setPreferredIOBufferDuration(0.05)
         try session.setActive(true, options: [])

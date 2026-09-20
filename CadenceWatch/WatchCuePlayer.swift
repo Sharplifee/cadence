@@ -60,8 +60,10 @@ public final class WatchCuePlayer: ObservableObject {
         data.append("data".data(using: .ascii)!); append(UInt32(bytes))
         for s in samples { append(Int16(max(-1, min(1, s)) * 32767)) }
 
-        try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
-        try? AVAudioSession.sharedInstance().setActive(true)
+        // Mix, never interrupt — a cue tone must not duck or stop whatever is
+        // playing, and must not reconfigure a session the recorder is using.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default,
+                                                         options: [.mixWithOthers])
         player = try? AVAudioPlayer(data: data)
         player?.volume = 1.0
         player?.play()

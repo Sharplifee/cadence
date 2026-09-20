@@ -12,7 +12,7 @@ struct SettingsView: View {
     @AppStorage("syncEnabled") private var syncEnabled = false
     @AppStorage("hasEnrolled") private var hasEnrolled = true
     @AppStorage("loopMinutes") private var loopMinutes = 5
-    @AppStorage("dualCapture") private var dualCapture = true
+    @AppStorage("dualCapture") private var dualCapture = false
 
     var body: some View {
         NavigationStack {
@@ -173,7 +173,7 @@ struct SettingsView: View {
                     .onChange(of: dualCapture) { _, on in
                         on ? phoneLoop.start() : phoneLoop.stop()
                     }
-                Text("Your watch records the whole time. This phone records too whenever it can get the microphone, and its audio is used instead because it sounds better. Calls, voice memos and other recorders take the mic away — the watch covers those stretches.")
+                Text("Off by default, and it should probably stay off. Any recording on this phone forces Bluetooth from stereo down to call quality — that is how the Bluetooth profiles work, not something an app can avoid. So the phone only ever records on speaker or wired headphones, and stops the instant AirPods or CarPlay connect. Your watch records the whole time regardless and never touches your phone's audio.")
                     .font(.caption2).foregroundStyle(.tertiary)
                 HStack {
                     Circle()
